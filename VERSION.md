@@ -1,5 +1,18 @@
 # image-proxy — Version History
 
+## VERSION 1.1.3 (2026-04-02)
+
+### Root Experience Improvement
+
+- **Feature**: Added a friendly welcome message to the root path (`/`) to identify the service and provide a link to documentation, replacing the previous 404 response.
+- **Testing**: Updated unit tests to verify the new root route and its CORS compliance.
+
+## VERSION 1.1.2 (2026-04-02)
+
+### Documentation & Setup Refinement
+
+- **Documentation**: Added `.env.example` file as a standard reference for required environment variables (`BUCKET_ACCESS_TOKEN`, `LICENSE_API_BASE`).
+
 ## VERSION 1.1.0 (2026-04-02)
 
 ### Complete Project Infrastructure — CI/CD, Testing, Linting, Governance

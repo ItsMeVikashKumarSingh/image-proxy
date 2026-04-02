@@ -105,15 +105,20 @@ describe('GET /health', () => {
   })
 })
 
-describe('GET /unknown — 404 routing', () => {
-  it('returns 404 for unrecognised paths', async () => {
-    const req = new Request('https://worker.dev/unknown/path')
-    const res = await worker.fetch(req, mockEnv, {})
-    expect(res.status).toBe(404)
-  })
-
-  it('returns 404 for root path', async () => {
+describe('GET / — Root welcome message', () => {
+  it('returns 200 with service identity', async () => {
     const req = new Request('https://worker.dev/')
+    const res = await worker.fetch(req, mockEnv, {})
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.message).toMatch(/Proxy/)
+    expect(body.status).toBe('active')
+  })
+})
+
+describe('GET /unknown-path — 404 routing', () => {
+  it('returns 404 for unhandled subpaths', async () => {
+    const req = new Request('https://worker.dev/non-existent')
     const res = await worker.fetch(req, mockEnv, {})
     expect(res.status).toBe(404)
   })

@@ -30,6 +30,7 @@ wedding-image-proxy.workers.dev   (this project)
 
 | Endpoint | Method | Description |
 |---|---|---|
+| `/` | `GET` | Service welcome message & docs link |
 | `/health` | `GET` | Health check — returns `{ status: "ok" }` |
 | `/images/*?url=<full_url>` | `GET` | Fetch & conditionally watermark image |
 | `*` | `OPTIONS` | CORS preflight — 204 |
@@ -76,13 +77,19 @@ npm install
 ### 2. Configure local secrets
 
 ```bash
+# Option A: Copy .dev.vars.example to .dev.vars (Cloudflare Native)
 cp .dev.vars.example .dev.vars
-# Edit .dev.vars with your real values — this file is gitignored
+
+# Option B: Use .env.example as a reference for your CI/CD setup
+cp .env.example .dev.vars
 ```
 
 `.dev.vars`:
 ```env
+# REQUIRED: Bearer token for accessing private R2 or Backblaze B2 bucket
 BUCKET_ACCESS_TOKEN=your_bucket_access_token_here
+
+# OPTIONAL: Zorvik tenant verification API base URL
 LICENSE_API_BASE=https://api.zorvik.com/api/v1/verify
 ```
 

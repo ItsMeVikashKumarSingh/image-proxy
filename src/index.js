@@ -37,6 +37,18 @@ export default {
       })
     }
 
+    // -- Root welcome message --
+    if (url.pathname === '/') {
+      return new Response(JSON.stringify({
+        message: 'Wedding Image Proxy — Dynamic Watermarking Service',
+        status: 'active',
+        docs: 'https://github.com/ItsMeVikashKumarSingh/image-proxy',
+      }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
     // -- Only handle /images/* paths --
     if (!url.pathname.startsWith('/images/')) {
       return new Response(JSON.stringify({ error: 'Not Found' }), {
