@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Husky pre-commit hook — runs lint-staged
+# Usage: Automatically triggered on git commit
+# Bypass is STRICTLY PROHIBITED (no --no-verify)
+npx lint-staged

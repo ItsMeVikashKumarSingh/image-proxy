@@ -1,0 +1,53 @@
+# CodeRabbit configuration for wedding-image-proxy
+# https://coderabbit.ai/docs/configuration
+
+language: "en-US"
+
+early_access: false
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "master"
+
+  path_filters:
+    - "!node_modules/**"
+    - "!.wrangler/**"
+    - "!dist/**"
+    - "!*.lock"
+
+  path_instructions:
+    - path: "src/**/*.js"
+      instructions: |
+        - Cloudflare Worker environment only — no Node.js built-ins allowed.
+        - All secrets must be consumed via env.* bindings — never hardcoded.
+        - All error responses must use safe, generic messages — never expose stack traces or internal details.
+        - fetch() calls must be mocked in tests, never making real network calls.
+        - CORS headers must be present on all responses.
+    - path: "test/**/*.js"
+      instructions: |
+        - Tests must cover all HTTP method and route branches.
+        - Vitest vi.stubGlobal('fetch', ...) must be used for all fetch mocking.
+        - Each test must use a fresh stub — no state leakage between tests.
+        - No real network calls allowed in tests.
+    - path: "wrangler.toml"
+      instructions: |
+        - No secrets or sensitive values may be placed in wrangler.toml.
+        - All secrets must be managed via `wrangler secret put`.
+    - path: ".github/workflows/**"
+      instructions: |
+        - Workflows must trigger on master push and PRs only.
+        - Secrets must use ${{ secrets.SECRET_NAME }} syntax.
+        - No hardcoded credentials allowed.
+
+chat:
+  auto_reply: true

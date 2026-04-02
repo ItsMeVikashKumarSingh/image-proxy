@@ -1,0 +1,10 @@
+# Local dev secrets — NEVER commit this file
+# Copy this file to .dev.vars and fill in your values.
+# .dev.vars is gitignored and runs automatically with `npm run dev`
+
+# Bearer token for accessing private R2 or Backblaze B2 bucket
+BUCKET_ACCESS_TOKEN=your_bucket_access_token_here
+
+# Zorvik tenant verification API base URL
+# Defaults to https://api.zorvik.com/api/v1/verify if not set
+LICENSE_API_BASE=https://api.zorvik.com/api/v1/verify

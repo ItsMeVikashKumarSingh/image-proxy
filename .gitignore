@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+dist/
+coverage/
+
+# Local dev secrets — NEVER commit this file
+.dev.vars

@@ -1,0 +1,94 @@
+name: CI — wedding-image-proxy
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 1: Lint — ESLint 9 Flat Config, Zero Warning Policy
+  # ─────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ESLint 9)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint (zero warnings policy)
+        run: npm run lint
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 2: Test — Vitest unit tests
+  # ─────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test (Vitest)
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 3: Build verification — Wrangler dry-run (no actual deploy)
+  # ─────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build (Wrangler dry-run)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wrangler dry-run (validate bundle)
+        run: npm run build
+        # CLOUDFLARE_API_TOKEN not required for dry-run
+        # For live deploy from CI, add secret: CLOUDFLARE_API_TOKEN in repo Settings → Secrets
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # NOTE: Production deploy is intentionally MANUAL via:
+  #   wrangler secret put BUCKET_ACCESS_TOKEN
+  #   wrangler secret put LICENSE_API_BASE
+  #   npm run deploy
+  #
+  # To enable auto-deploy on master push, add a `deploy` job using:
+  #   cloudflare/wrangler-action@v3
+  #   with secret CLOUDFLARE_API_TOKEN in repo settings.
+  # ─────────────────────────────────────────────────────────────────────────
