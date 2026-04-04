@@ -17,7 +17,7 @@ WEDDING Frontend (Netlify)
         ▼
 wedding-image-proxy.workers.dev   (this project)
         │
-        ├── POST Zorvik License API ──► validate tenant domain
+        ├── GET Supabase REST API ──► validate tenant & features
         │         ▼  authorized
         ├── GET private R2 / B2 URL
         │         ▼
@@ -58,7 +58,8 @@ All responses include `Access-Control-Allow-Origin: *`.
 | Name | Storage | Required | Description |
 |---|---|---|---|
 | `BUCKET_ACCESS_TOKEN` | Cloudflare Worker Secret | Yes | Bearer token for private R2 / B2 bucket |
-| `LICENSE_API_BASE` | Cloudflare Worker Secret | No | Zorvik verify API URL (defaults to `https://api.zorvik.com/api/v1/verify`) |
+| `SUPABASE_URL` | Cloudflare Worker Secret | Yes | Supabase project URL (`https://xyz.supabase.co`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Cloudflare Worker Secret | Yes | Service role key for license verification |
 
 > **Security rule**: No secrets may be stored in `wrangler.toml` or any committed file. Use `wrangler secret put` or the Cloudflare dashboard.
 
@@ -89,8 +90,9 @@ cp .env.example .dev.vars
 # REQUIRED: Bearer token for accessing private R2 or Backblaze B2 bucket
 BUCKET_ACCESS_TOKEN=your_bucket_access_token_here
 
-# OPTIONAL: Zorvik tenant verification API base URL
-LICENSE_API_BASE=https://api.zorvik.com/api/v1/verify
+# REQUIRED: Supabase project URL & Service Role Key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 ```
 
 ### 3. Start local dev server
@@ -159,10 +161,8 @@ npx wrangler login
 
 ```bash
 wrangler secret put BUCKET_ACCESS_TOKEN
-# Enter your bucket access token when prompted
-
-wrangler secret put LICENSE_API_BASE
-# Enter: https://api.zorvik.com/api/v1/verify
+wrangler secret put SUPABASE_URL
+wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 ```
 
 ### 3. Deploy
@@ -238,6 +238,6 @@ image-proxy/
 
 ## GitHub Repository Description
 
-> Cloudflare Worker for secure, real-time image watermarking — validates studio tenants via Zorvik License API and serves assets from R2/B2 with Cloudflare Image Resizing.
+> Cloudflare Worker for secure, real-time image watermarking — validates studio tenants directly via **Supabase Database (Edge REST API)** and serves assets from R2/B2 with Cloudflare Image Resizing.
 
 **Topics to add:** `cloudflare-workers`, `wrangler`, `image-watermarking`, `edge-computing`, `cloudflare-r2`, `multi-tenant`
