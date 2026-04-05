@@ -91,13 +91,16 @@ async function getTenantSettings(tenantId, hostname, env) {
 
   if (!clientResp.ok) {
     if (clientResp.status === 406 || clientResp.status === 404) {
-      throw new Error('UNAUTHORIZED_DOMAIN')
+      throw new Error('TENANT_NOT_FOUND')
     }
     const errorText = await clientResp.text()
     throw new Error(`Supabase Client lookup failed: ${errorText}`)
   }
 
   const client = await clientResp.json()
+  if (!client || Object.keys(client).length === 0) {
+      throw new Error('TENANT_NOT_FOUND')
+  }
 
   // 1a. Strict hostname match verification
   const licensedDomains = (client.tc_domain || '')
@@ -214,14 +217,17 @@ export default {
     try {
       tenantSettings = await getTenantSettings(tenantId, hostname, env)
     } catch (err) {
-      const isAuthError = err.message === 'UNAUTHORIZED_DOMAIN' || err.message === 'TENANT_SUSPENDED'
+      const isAuthError = err.message === 'UNAUTHORIZED_DOMAIN' || err.message === 'TENANT_SUSPENDED' || err.message === 'TENANT_NOT_FOUND'
       if (isAuthError) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 403,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'X-Error-Reason': err.message },
         })
       }
-      throw err
+      return new Response(JSON.stringify({ error: 'Tenant verification failed', details: err.message }), {
+        status: 406,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'X-Error-Reason': 'SYSTEM_ERROR' },
+      })
     }
 
     // -- Handle PUT (Secure Upload Proxy) --
