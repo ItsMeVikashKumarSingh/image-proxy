@@ -1,5 +1,10 @@
 # image-proxy — Version History
 
+## VERSION 0.6.1 (2026-04-06) - Observability Stabilization
+- **Configuration**: Implemented standardized `[observability]` settings in `wrangler.toml`.
+- **Diagnostics**: Enabled persistent logs and trace sampling for improved production troubleshooting.
+- **Hygiene**: Cleaned up compatibility flags and verified consistency across environments.
+
 ## VERSION 0.6.0 (2026-04-06) - Secure Multi-Cloud Gateway
 - **Architecture**: Transformed into a **Secure Tiered Storage Gateway** supporting both Cloudflare R2 (Images) and Backblaze B2 (Video/Deliverables).
 - **Multi-Cloud Integration**: Added `aws4fetch` to sign authenticated Backblaze B2 requests (S3-Compatible API).
