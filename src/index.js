@@ -1,18 +1,16 @@
 /**
- * Cloudflare Worker: Secure Image Watermark Proxy
+ * Cloudflare Worker: Secure Multi-Cloud Storage Gateway
  * Project: wedding-image-proxy
- * Version: 0.5.3
+ * Version: 0.6.0
  *
  * Purpose:
- *   - Receives image requests from the WEDDING frontend
- *   - Validates the tenant's license directly via Supabase REST API (Edge)
- *   - Fetches original images from R2 bucket via native Bindings (env.BUCKET)
- *   - Applies dynamic watermarks via Cloudflare Image Resizing (if enabled)
- *
- * Required Secrets (set via `wrangler secret put`):
- *   - SUPABASE_URL                : Supabase project URL
- *   - SUPABASE_SERVICE_ROLE_KEY   : Service role key for license verification
+ *   - Securely proxies assets from Cloudflare R2 and Backblaze B2.
+ *   - Enforces strict Multi-Tenant folder isolation (/{bucket}/{tenantId}/...).
+ *   - Authenticates private Backblaze B2 requests via AWS Signature V4.
+ *   - Validates the tenant's license directly via Supabase REST API (Edge).
  */
+
+import { AwsClient } from 'aws4fetch'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -23,17 +21,13 @@ const CORS_HEADERS = {
 
 /**
  * Helper: Normalize URL to hostname or host.
- * Ported from Zorvik-Tech to ensure identical domain matching.
  */
 function getHostname(urlStr) {
   if (!urlStr) return ''
   try {
     const url = new URL(urlStr)
-    // Always return just the hostname (e.g., 'localhost', 'dreamland-studios.netlify.app')
-    // This strips ports and protocols for consistent DB comparison.
     return url.hostname.toLowerCase()
   } catch {
-    // Fallback for simple strings or malformed origins
     try {
       const fixedUrl = urlStr.startsWith('http') ? urlStr : `https://${urlStr}`
       return (new URL(fixedUrl)).hostname.toLowerCase()
@@ -45,7 +39,6 @@ function getHostname(urlStr) {
 
 /**
  * Deep merge helper for plan features + tenant overrides.
- * Ported from Zorvik-Tech.
  */
 function mergeDeep(target, source) {
   const isObject = (item) => item !== null && typeof item === 'object' && !Array.isArray(item)
@@ -64,26 +57,22 @@ function mergeDeep(target, source) {
 
 /**
  * Fetch tenant settings directly from Supabase with Edge Caching.
- * IDENTITY-FIRST: Uses tc_id for deterministic lookup, then verifies Origin.
  */
 async function getTenantSettings(tenantId, hostname, env) {
   const isDev = hostname === 'localhost' || hostname === '127.0.0.1'
   const cache = caches.default
   const cacheKey = new Request(`https://image-proxy-cache.local/tenant/id/${tenantId}`)
   
-  // Dev-friendly: Bypass cache for localhost to ensure real-time resolution
   const cachedResponse = isDev ? null : await cache.match(cacheKey)
 
   if (cachedResponse) {
     const result = await cachedResponse.json()
-    // Verification: Even if cached, we must ensure the host is authorized for this ID
     if (!result.data.licensedDomains.includes(hostname)) {
       throw new Error('UNAUTHORIZED_DOMAIN')
     }
     return result
   }
 
-  // Supabase Rest API Headers
   const headers = {
     'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
     'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
@@ -91,7 +80,6 @@ async function getTenantSettings(tenantId, hostname, env) {
     'Accept-Profile': 'management',
   }
 
-  // 1. Fetch Client from management.tbl_clients via GUID (tc_id)
   const clientUrl = `${env.SUPABASE_URL}/rest/v1/tbl_clients?tc_id=eq.${tenantId}&tc_deleted_flag=eq.false`
   const clientResp = await fetch(clientUrl, { headers })
 
@@ -99,16 +87,14 @@ async function getTenantSettings(tenantId, hostname, env) {
     if (clientResp.status === 406 || clientResp.status === 404) {
       throw new Error('TENANT_NOT_FOUND')
     }
-    const errorText = await clientResp.text()
-    throw new Error(`Supabase Client lookup failed: ${errorText}`)
+    throw new Error(`Supabase Client lookup failed: ${clientResp.statusText}`)
   }
 
   const client = await clientResp.json()
   if (!client || Object.keys(client).length === 0) {
-      throw new Error('TENANT_NOT_FOUND')
+    throw new Error('TENANT_NOT_FOUND')
   }
 
-  // 1a. Strict hostname match verification
   const licensedDomains = (client.tc_domain || '')
     .split(',')
     .map(d => getHostname(d.trim()))
@@ -118,12 +104,10 @@ async function getTenantSettings(tenantId, hostname, env) {
     throw new Error('UNAUTHORIZED_DOMAIN')
   }
 
-  // 1b. Status check
   if (client.tc_status === 'suspended') {
     throw new Error('TENANT_SUSPENDED')
   }
 
-  // 2. Fetch Plan Features if client has a plan
   let planFeatures = {}
   if (client.tc_plan_id) {
     const planUrl = `${env.SUPABASE_URL}/rest/v1/tbl_plans?tp_id=eq.${client.tc_plan_id}`
@@ -134,7 +118,6 @@ async function getTenantSettings(tenantId, hostname, env) {
     }
   }
 
-  // 3. Merge Plan Features + Tenant Overrides
   const mergedFeatures = mergeDeep(planFeatures, client.tc_feature_overrides || {})
 
   const result = {
@@ -148,51 +131,67 @@ async function getTenantSettings(tenantId, hostname, env) {
     }
   }
 
-  // Cache successful result for 5 minutes
   const responseToCache = new Response(JSON.stringify(result), {
-    headers: { 
-      'Content-Type': 'application/json',
-      'Cache-Control': 'max-age=300' 
-    }
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=300' }
   })
-  // ctx.waitUntil can be used if we had ctx, but for simple put it's fine
   await cache.put(cacheKey, responseToCache)
 
   return result
 }
 
+/**
+ * Fetch from Backblaze B2 via S3-Compatible API with SIGv4 Signing.
+ */
+async function fetchFromB2(bucketName, objectKey, env) {
+  if (!env.B2_APPLICATION_KEY_ID || !env.B2_APPLICATION_KEY || !env.B2_ENDPOINT) {
+    throw new Error('B2 configuration secrets are missing.')
+  }
+
+  const b2 = new AwsClient({
+    accessKeyId: env.B2_APPLICATION_KEY_ID,
+    secretAccessKey: env.B2_APPLICATION_KEY,
+    service: 's3',
+    region: env.B2_REGION || 'eu-central-003',
+  })
+
+  // Format: https://bucket.s3.region.backblazeb2.com/key
+  const url = `https://${bucketName}.${env.B2_ENDPOINT}/${objectKey}`
+  
+  const response = await b2.fetch(url, {
+    method: 'GET',
+    headers: {
+      'Host': `${bucketName}.${env.B2_ENDPOINT}`,
+    }
+  })
+
+  return response
+}
+
 export default {
-  async fetch(request, env, _ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url)
 
-    // -- CORS preflight --
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS })
     }
 
-    // -- Health check endpoint --
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.5.3' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.6.0' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }
 
-    // -- Root welcome message --
-    if (url.pathname === '/') {
-      return new Response(JSON.stringify({
-        status: 'running',
-        service: 'wedding-image-proxy',
-        message: 'Wedding Image Proxy — Active and Running',
-        version: '0.5.3',
-      }), {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
+    // Mapping of path prefixes to multi-cloud buckets
+    const ROUTE_CONFIG = {
+      image: { prefix: '/images/', bucket: 'R2', type: 'image' },
+      reel: { prefix: '/reels/', bucket: env.B2_REELS_BUCKET || 'studio-private-reels', type: 'video' },
+      film: { prefix: '/films/', bucket: env.B2_FILMS_BUCKET || 'studio-private-films', type: 'video' },
+      deliverable: { prefix: '/deliverables/', bucket: env.B2_PRIVATE_BUCKET || 'studio-private-deliverables', type: 'mixed' },
     }
 
-    // -- Only handle /images/* paths --
-    if (!url.pathname.startsWith('/images/')) {
+    const route = Object.values(ROUTE_CONFIG).find(r => url.pathname.startsWith(r.prefix))
+    if (!route) {
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -200,10 +199,8 @@ export default {
     }
 
     // -- Extract Tenant Identity and Object Key from Path --
-    // Format: /images/{tenantId}/folder/photo.jpg
-    const pathParts = url.pathname.replace('/images/', '').split('/')
-    const tenantId = pathParts[0]
-    const objectKey = pathParts.slice(1).join('/')
+    const objectKey = url.pathname.replace(route.prefix, '')
+    const tenantId = objectKey.split('/')[0]
 
     if (!tenantId || !objectKey) {
       return new Response(JSON.stringify({ error: 'Incomplete path: Missing tenantId or objectKey' }), {
@@ -216,15 +213,11 @@ export default {
     const originHeader = request.headers.get('Origin') || request.headers.get('Referer') || request.url
     const hostname = getHostname(originHeader)
 
-    if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-      throw new Error('Supabase configuration secrets are missing.')
-    }
-
     let tenantSettings
     try {
       tenantSettings = await getTenantSettings(tenantId, hostname, env)
     } catch (err) {
-      const isAuthError = err.message === 'UNAUTHORIZED_DOMAIN' || err.message === 'TENANT_SUSPENDED' || err.message === 'TENANT_NOT_FOUND'
+      const isAuthError = ['UNAUTHORIZED_DOMAIN', 'TENANT_SUSPENDED', 'TENANT_NOT_FOUND'].includes(err.message)
       const debugHeaders = {
         ...CORS_HEADERS,
         'Content-Type': 'application/json',
@@ -234,10 +227,7 @@ export default {
       }
 
       if (isAuthError) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 403,
-          headers: debugHeaders,
-        })
+        return new Response(JSON.stringify({ error: err.message }), { status: 403, headers: debugHeaders })
       }
       return new Response(JSON.stringify({ error: 'Tenant verification failed', details: err.message }), {
         status: 406,
@@ -246,11 +236,9 @@ export default {
     }
 
     // -- Handle PUT (Secure Upload Proxy) --
-    if (request.method === 'PUT') {
-      if (!env.BUCKET) {
-        throw new Error('R2 Bucket binding is missing in Worker configuration.')
-      }
-
+    // Only R2 currently supports proxy upload for images
+    if (request.method === 'PUT' && route.bucket === 'R2') {
+      if (!env.BUCKET) throw new Error('R2 Bucket binding is missing.')
       try {
         const contentType = request.headers.get('Content-Type') || 'image/jpeg'
         await env.BUCKET.put(objectKey, request.body, {
@@ -260,13 +248,11 @@ export default {
             uploaded_at: new Date().toISOString(),
           }
         })
-
         return new Response(JSON.stringify({ success: true, key: objectKey }), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
-      } catch (err) {
-        console.error('[image-proxy] Upload failure:', err)
+      } catch (_err) {
         return new Response(JSON.stringify({ error: 'Upload failed' }), {
           status: 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -274,68 +260,55 @@ export default {
       }
     }
 
+    // -- Handle GET (Secure Retrieval) --
     try {
-
-      const { features } = tenantSettings.data
-      const watermarkEnabled = features?.enable_watermark || false
-      const watermarkUrl = features?.watermark_url || null
-
-      // 2. Fetch Original from R2 Bucket (Native Binding)
-      if (!env.BUCKET) {
-        throw new Error('R2 Bucket binding is missing in Worker configuration.')
-      }
-
-      const object = await env.BUCKET.get(objectKey)
-      if (!object) {
-        return new Response(JSON.stringify({ error: `Asset not found: ${objectKey}` }), {
-          status: 404,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-
-      // 3. Serve with or without watermark via Cloudflare Image Resizing
-      if (watermarkEnabled && watermarkUrl) {
-        const cfOptions = {
-          cf: {
-            image: {
-              width: 1920,
-              fit: 'scale-down',
-              draw: [
-                {
-                  url: watermarkUrl,
-                  opacity: 0.8,
-                  gravity: 'bottom-right',
-                  width: 500,
-                },
-              ],
-            },
-          },
+      let response
+      if (route.bucket === 'R2') {
+        if (!env.BUCKET) throw new Error('R2 Bucket binding is missing.')
+        const object = await env.BUCKET.get(objectKey)
+        if (!object) {
+          return new Response(JSON.stringify({ error: `Asset not found in R2: ${objectKey}` }), {
+            status: 404,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
         }
 
-        // We fetch the current request URL with resizing options applied
-        // But since we are using bindings, we can't resize from a stream directly without a URL
-        // SO: We keep using the image resizing by passing the R2 object status.
-        return new Response(object.body, {
+        // Apply Image Resizing/Watermark if enabled (only for images)
+        const { features } = tenantSettings.data
+        if (route.type === 'image' && features?.enable_watermark && features?.watermark_url) {
+          return new Response(object.body, {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
+            cf: {
+              image: {
+                width: 1920,
+                fit: 'scale-down',
+                draw: [{ url: features.watermark_url, opacity: 0.8, gravity: 'bottom-right', width: 500 }],
+              },
+            },
+          })
+        }
+        response = new Response(object.body, {
           status: 200,
-          headers: { 
-            ...CORS_HEADERS, 
-            'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' 
-          },
-          ...cfOptions
+          headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
         })
       } else {
-        // No watermark — pass through raw image
-        return new Response(object.body, {
+        // Backblaze B2 Retrieval
+        const b2Response = await fetchFromB2(route.bucket, objectKey, env)
+        if (!b2Response.ok) {
+          return new Response(JSON.stringify({ error: `Asset not found in B2 (${route.bucket}): ${objectKey}` }), {
+            status: b2Response.status,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+        response = new Response(b2Response.body, {
           status: 200,
-          headers: { 
-            ...CORS_HEADERS, 
-            'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' 
-          },
+          headers: { ...CORS_HEADERS, 'Content-Type': b2Response.headers.get('Content-Type') || 'video/mp4' },
         })
       }
+      return response
     } catch (error) {
-      console.error('[image-proxy] Unhandled error:', error?.message || error)
-      return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
+      return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {
         status: 500,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })

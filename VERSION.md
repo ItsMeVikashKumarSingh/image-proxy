@@ -1,6 +1,17 @@
 # image-proxy — Version History
 
-## VERSION 0.5.3 (2026-04-06) - Final Identity Resolution
+## VERSION 0.6.0 (2026-04-06) - Secure Multi-Cloud Gateway
+- **Architecture**: Transformed into a **Secure Tiered Storage Gateway** supporting both Cloudflare R2 (Images) and Backblaze B2 (Video/Deliverables).
+- **Multi-Cloud Integration**: Added `aws4fetch` to sign authenticated Backblaze B2 requests (S3-Compatible API).
+- **Tiered Routing**: 
+    - `/images/` -> Cloudflare R2 (Portfolio)
+    - `/reels/` -> Backblaze B2 (Private Reels)
+    - `/films/` -> Backblaze B2 (Private Films)
+    - `/deliverables/` -> Backblaze B2 (Private Deliverables)
+- **Security**: 
+    - Enforced **Tenant Folder Isolation** across all storage (`/{tenantId}/...`).
+    - Unified the **Identity-First** verification for all tiered paths.
+    - All B2 buckets are now treated as **Private** and require sigv4 signing.
 - **Bug Fix**: Explicitly added the `'Accept-Profile': 'management'` header to all Supabase REST calls. This resolves the `TENANT_NOT_FOUND` error caused by Supabase defaulting to the `public` schema.
 - **Sync**: Verified that all internal tenant lookups correctly target the `management` schema in the database.
 
