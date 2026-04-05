@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.5.3 (2026-04-06) - Final Identity Resolution
+- **Bug Fix**: Explicitly added the `'Accept-Profile': 'management'` header to all Supabase REST calls. This resolves the `TENANT_NOT_FOUND` error caused by Supabase defaulting to the `public` schema.
+- **Sync**: Verified that all internal tenant lookups correctly target the `management` schema in the database.
+
 ## VERSION 0.5.2 (2026-04-06) - Diagnostic Hardening
 - **Security**: Hardened `getHostname` logic to ensure consistent matching across dev/prod environments (strips ports/protocols).
 - **Diagnostics**:

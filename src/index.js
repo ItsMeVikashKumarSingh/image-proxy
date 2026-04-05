@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker: Secure Image Watermark Proxy
  * Project: wedding-image-proxy
- * Version: 0.5.2
+ * Version: 0.5.3
  *
  * Purpose:
  *   - Receives image requests from the WEDDING frontend
@@ -88,6 +88,7 @@ async function getTenantSettings(tenantId, hostname, env) {
     'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
     'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
     'Accept': 'application/vnd.pgrst.object+json',
+    'Accept-Profile': 'management',
   }
 
   // 1. Fetch Client from management.tbl_clients via GUID (tc_id)
@@ -171,7 +172,7 @@ export default {
 
     // -- Health check endpoint --
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.5.2' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.5.3' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -183,7 +184,7 @@ export default {
         status: 'running',
         service: 'wedding-image-proxy',
         message: 'Wedding Image Proxy — Active and Running',
-        version: '0.5.2',
+        version: '0.5.3',
       }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
