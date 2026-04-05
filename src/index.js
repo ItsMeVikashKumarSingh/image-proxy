@@ -143,15 +143,15 @@ async function getTenantSettings(tenantId, hostname, env) {
  * Fetch from Backblaze B2 via S3-Compatible API with SIGv4 Signing.
  */
 async function fetchFromB2(bucketName, objectKey, env) {
-  if (!env.B2_APPLICATION_KEY_ID || !env.B2_APPLICATION_KEY || !env.B2_ENDPOINT) {
-    throw new Error('B2 configuration secrets are missing.')
+  if (!env.B2_APPLICATION_KEY_ID || !env.B2_APPLICATION_KEY || !env.B2_ENDPOINT || !env.B2_REGION) {
+    throw new Error('B2 configuration secrets are missing (ID, Key, Endpoint, or Region).')
   }
 
   const b2 = new AwsClient({
     accessKeyId: env.B2_APPLICATION_KEY_ID,
     secretAccessKey: env.B2_APPLICATION_KEY,
     service: 's3',
-    region: env.B2_REGION || 'eu-central-003',
+    region: env.B2_REGION,
   })
 
   // Format: https://bucket.s3.region.backblazeb2.com/key

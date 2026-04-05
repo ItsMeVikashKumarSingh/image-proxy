@@ -1,5 +1,10 @@
 # image-proxy — Version History
 
+## VERSION 0.6.4 (2026-04-06) - Zero-Fallback Policy
+- **Hardening**: Removed all hardcoded default regions (e.g., `eu-central-003`) from the B2 fetcher.
+- **Validation**: Added `B2_REGION` to the mandatory secrets check. The system now fails loudly if the region is not explicitly configured.
+- **Security**: Prevented silent `SignatureDoesNotMatch` errors caused by incorrect regional defaults.
+
 ## VERSION 0.6.1 (2026-04-06) - Observability Stabilization
 - **Configuration**: Implemented standardized `[observability]` settings in `wrangler.toml`.
 - **Diagnostics**: Enabled persistent logs and trace sampling for improved production troubleshooting.
