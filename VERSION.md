@@ -1,6 +1,19 @@
 # image-proxy — Version History
 
-# image-proxy — Version History
+## VERSION 1.3.0 (2026-04-05)
+
+### Major Architecture: Native R2 Bindings
+- **Infrastructure**: Switched from `fetch`-based public URL retrieval to **Native R2 Bindings** (`env.BUCKET.get`).
+- **Performance**: Eliminated overhead of public internet fetching and bypassed the throttled `*.r2.dev` gateway.
+- **Security**: Deprecated and removed all references to `BUCKET_ACCESS_TOKEN`. Access is now handled securely via Cloudflare's private network.
+- **Improved API**: Simplified the URL structure — removed the `?url=` query parameter in favor of direct path-based object mapping (`/images/key`).
+- **Testing**: Updated the Vitest test suite to match the new binding-based worker implementation.
+
+## VERSION 1.2.0 (2026-04-05)
+
+### Health Check & Identity Sync
+- **Feature**: Standardized `/health` and `/` root responses with service identity.
+- **Governance**: Integrated into the main project workspace.
 
 ## VERSION 0.2.0 (2026-04-03)
 

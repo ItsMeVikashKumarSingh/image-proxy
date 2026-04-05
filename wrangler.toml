@@ -3,12 +3,16 @@ name = "wedding-image-proxy"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
+# R2 Bucket Binding (Direct Access)
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "studio-public-gallery"
 
 # Secrets are NOT stored here.
 # Set them via CLI before deploying:
-#   wrangler secret put BUCKET_ACCESS_TOKEN
-#   wrangler secret put LICENSE_API_BASE
+#   wrangler secret put SUPABASE_URL
+#   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 #
 # For local dev, create a .dev.vars file (DO NOT COMMIT):
-#   BUCKET_ACCESS_TOKEN=your_token_here
-#   LICENSE_API_BASE=https://api.zorvik.com/api/v1/verify
+#   SUPABASE_URL=https://your-project.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
