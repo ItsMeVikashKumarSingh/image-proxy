@@ -62,14 +62,20 @@ function mergeDeep(target, source) {
 
 /**
  * Fetch tenant settings directly from Supabase with Edge Caching.
+ * IDENTITY-FIRST: Uses tc_id for deterministic lookup, then verifies Origin.
  */
-async function getTenantSettings(hostname, env) {
+async function getTenantSettings(tenantId, hostname, env) {
   const cache = caches.default
-  const cacheKey = new Request(`https://image-proxy-cache.local/tenant/${hostname}`)
+  const cacheKey = new Request(`https://image-proxy-cache.local/tenant/id/${tenantId}`)
   const cachedResponse = await cache.match(cacheKey)
 
   if (cachedResponse) {
-    return await cachedResponse.json()
+    const result = await cachedResponse.json()
+    // Verification: Even if cached, we must ensure the host is authorized for this ID
+    if (!result.data.licensedDomains.includes(hostname)) {
+      throw new Error('UNAUTHORIZED_DOMAIN')
+    }
+    return result
   }
 
   // Supabase Rest API Headers
@@ -79,8 +85,8 @@ async function getTenantSettings(hostname, env) {
     'Accept': 'application/vnd.pgrst.object+json',
   }
 
-  // 1. Fetch Client from management.tbl_clients
-  const clientUrl = `${env.SUPABASE_URL}/rest/v1/tbl_clients?tc_domain=ilike.${encodeURIComponent(`%${hostname}%`)}&tc_deleted_flag=eq.false`
+  // 1. Fetch Client from management.tbl_clients via GUID (tc_id)
+  const clientUrl = `${env.SUPABASE_URL}/rest/v1/tbl_clients?tc_id=eq.${tenantId}&tc_deleted_flag=eq.false`
   const clientResp = await fetch(clientUrl, { headers })
 
   if (!clientResp.ok) {
@@ -93,7 +99,7 @@ async function getTenantSettings(hostname, env) {
 
   const client = await clientResp.json()
 
-  // 1a. Strict hostname match verification (tc_domain is comma-separated)
+  // 1a. Strict hostname match verification
   const licensedDomains = (client.tc_domain || '')
     .split(',')
     .map(d => getHostname(d.trim()))
@@ -128,6 +134,7 @@ async function getTenantSettings(hostname, env) {
       client_id: client.tc_id,
       features: mergedFeatures,
       is_maintenance: client.tc_is_maintenance || false,
+      licensedDomains: licensedDomains,
     }
   }
 
@@ -155,7 +162,7 @@ export default {
 
     // -- Health check endpoint --
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '1.4.0' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.5.0' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -167,7 +174,7 @@ export default {
         status: 'running',
         service: 'wedding-image-proxy',
         message: 'Wedding Image Proxy — Active and Running',
-        version: '1.4.0',
+        version: '0.5.0',
       }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -182,17 +189,20 @@ export default {
       })
     }
 
-    // -- Extract Object Key from Path --
-    // Format: /images/folder/photo.jpg -> folder/photo.jpg
-    const objectKey = decodeURIComponent(url.pathname.replace('/images/', ''))
-    if (!objectKey) {
-      return new Response(JSON.stringify({ error: 'Missing object key in pathname' }), {
+    // -- Extract Tenant Identity and Object Key from Path --
+    // Format: /images/{tenantId}/folder/photo.jpg
+    const pathParts = url.pathname.replace('/images/', '').split('/')
+    const tenantId = pathParts[0]
+    const objectKey = pathParts.slice(1).join('/')
+
+    if (!tenantId || !objectKey) {
+      return new Response(JSON.stringify({ error: 'Incomplete path: Missing tenantId or objectKey' }), {
         status: 400,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }
 
-    // 1. Resolve tenant via direct Supabase REST API
+    // 1. Resolve tenant via direct Supabase REST API (Identity-First)
     const originHeader = request.headers.get('Origin') || request.headers.get('Referer') || request.url
     const hostname = getHostname(originHeader)
 
@@ -202,7 +212,7 @@ export default {
 
     let tenantSettings
     try {
-      tenantSettings = await getTenantSettings(hostname, env)
+      tenantSettings = await getTenantSettings(tenantId, hostname, env)
     } catch (err) {
       const isAuthError = err.message === 'UNAUTHORIZED_DOMAIN' || err.message === 'TENANT_SUSPENDED'
       if (isAuthError) {

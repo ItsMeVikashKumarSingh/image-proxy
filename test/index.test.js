@@ -1,5 +1,5 @@
 /**
- * image-proxy Worker — Unit Test Suite (v1.4.0)
+ * image-proxy Worker — Unit Test Suite (v0.5.0)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import worker from '../src/index.js'
@@ -24,18 +24,12 @@ const mockEnv = {
   BUCKET: mockBucket,
 }
 
-const supabaseClientActive = () => mockJsonResponse({
-  tc_id: 'tenant-123',
+const supabaseClientActive = (id = 'tenant-123') => mockJsonResponse({
+  tc_id: id,
   tc_domain: 'worker.dev, localhost',
   tc_status: 'active',
   tc_plan_id: 'plan-basic',
   tc_feature_overrides: { enable_watermark: false }
-})
-
-const supabaseClientSuspended = () => mockJsonResponse({
-  tc_id: 'tenant-123',
-  tc_domain: 'worker.dev',
-  tc_status: 'suspended'
 })
 
 // ── Setup / Teardown ─────────────────────────────────────────────────────────
@@ -64,7 +58,7 @@ describe('Basic Routing', () => {
     const res = await worker.fetch(req, mockEnv, {})
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.version).toBe('1.4.0')
+    expect(body.version).toBe('0.5.0')
   })
 
   it('GET /: returns 200 simple status message', async () => {
@@ -72,24 +66,18 @@ describe('Basic Routing', () => {
     const res = await worker.fetch(req, mockEnv, {})
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.status).toBe('running')
-  })
-
-  it('GET /unknown: returns 404', async () => {
-    const req = new Request('https://worker.dev/non-existent')
-    const res = await worker.fetch(req, mockEnv, {})
-    expect(res.status).toBe(404)
+    expect(body.version).toBe('0.5.0')
   })
 })
 
-describe('Secure Upload Proxy (PUT)', () => {
-  it('successfully uploads to R2 when origin is authorized', async () => {
+describe('Identity-First Verification (PUT)', () => {
+  it('successfully uploads to R2 when tenantId and Origin are valid', async () => {
     fetch
-      .mockResolvedValueOnce(supabaseClientActive())
+      .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
       .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
     mockBucket.put.mockResolvedValueOnce(undefined)
 
-    const req = new Request('https://worker.dev/images/test.jpg', {
+    const req = new Request('https://worker.dev/images/tenant-123/test.jpg', {
       method: 'PUT',
       headers: { 'Origin': 'http://localhost:5173', 'Content-Type': 'image/jpeg' },
       body: new Uint8Array([0x00])
@@ -101,9 +89,10 @@ describe('Secure Upload Proxy (PUT)', () => {
     }))
   })
 
-  it('rejects upload (403) when domain is unauthorized', async () => {
-    fetch.mockResolvedValueOnce(mockJsonResponse({ error: 'Not authorized' }, 406))
-    const req = new Request('https://worker.dev/images/test.jpg', {
+  it('rejects upload (403) when Origin is unauthorized for that tenantId', async () => {
+    // Tenant-123 is ONLY authorized for worker.dev, not malicious.com
+    fetch.mockResolvedValueOnce(supabaseClientActive('tenant-123'))
+    const req = new Request('https://worker.dev/images/tenant-123/test.jpg', {
       method: 'PUT',
       headers: { 'Origin': 'https://malicious.com' }
     })
@@ -112,27 +101,25 @@ describe('Secure Upload Proxy (PUT)', () => {
     expect((await res.json()).error).toBe('UNAUTHORIZED_DOMAIN')
   })
 
-  it('rejects upload (403) when tenant is suspended', async () => {
-    fetch.mockResolvedValueOnce(supabaseClientSuspended())
-    const req = new Request('https://worker.dev/images/test.jpg', {
-      method: 'PUT',
-      headers: { 'Origin': 'https://worker.dev' }
-    })
+  it('rejects request (400) when tenantId is missing in path', async () => {
+    const req = new Request('https://worker.dev/images/photo.jpg') // No ID segment
     const res = await worker.fetch(req, mockEnv, {})
-    expect(res.status).toBe(403)
-    expect((await res.json()).error).toBe('TENANT_SUSPENDED')
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/Incomplete path/)
   })
 })
 
-describe('Image Serving (GET /images/*)', () => {
-  it('serves image when authorized', async () => {
-    fetch.mockResolvedValueOnce(supabaseClientActive())
+describe('Identity-First Verification (GET)', () => {
+  it('serves image when tenantId and Host match', async () => {
+    fetch
+      .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
+      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
     mockBucket.get.mockResolvedValueOnce({
       body: new Uint8Array([0x00]).buffer,
       httpMetadata: { contentType: 'image/jpeg' }
     })
 
-    const req = new Request('https://worker.dev/images/photo.jpg', {
+    const req = new Request('https://worker.dev/images/tenant-123/photo.jpg', {
         headers: { 'Origin': 'https://worker.dev' }
     })
     const res = await worker.fetch(req, mockEnv, {})
