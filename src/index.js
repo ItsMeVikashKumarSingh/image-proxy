@@ -16,8 +16,9 @@
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Tenant-ID',
+  'Access-Control-Expose-Headers': 'X-Tenant-ID',
 }
 
 /**
@@ -154,7 +155,7 @@ export default {
 
     // -- Health check endpoint --
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '1.2.0' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '1.4.0' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -163,9 +164,10 @@ export default {
     // -- Root welcome message --
     if (url.pathname === '/') {
       return new Response(JSON.stringify({
-        message: 'Wedding Image Proxy — Dynamic Watermarking Service',
-        status: 'active',
-        docs: 'https://github.com/ItsMeVikashKumarSingh/image-proxy',
+        status: 'running',
+        service: 'wedding-image-proxy',
+        message: 'Wedding Image Proxy — Active and Running',
+        version: '1.4.0',
       }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -190,28 +192,58 @@ export default {
       })
     }
 
+    // 1. Resolve tenant via direct Supabase REST API
+    const originHeader = request.headers.get('Origin') || request.headers.get('Referer') || request.url
+    const hostname = getHostname(originHeader)
+
+    if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('Supabase configuration secrets are missing.')
+    }
+
+    let tenantSettings
     try {
-      // 1. Resolve tenant via direct Supabase REST API
-      const originHost = request.headers.get('host') || url.hostname
-      const hostname = getHostname(originHost)
+      tenantSettings = await getTenantSettings(hostname, env)
+    } catch (err) {
+      const isAuthError = err.message === 'UNAUTHORIZED_DOMAIN' || err.message === 'TENANT_SUSPENDED'
+      if (isAuthError) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 403,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      throw err
+    }
 
-      if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-        throw new Error('Supabase configuration secrets are missing.')
+    // -- Handle PUT (Secure Upload Proxy) --
+    if (request.method === 'PUT') {
+      if (!env.BUCKET) {
+        throw new Error('R2 Bucket binding is missing in Worker configuration.')
       }
 
-      let tenantSettings
       try {
-        tenantSettings = await getTenantSettings(hostname, env)
+        const contentType = request.headers.get('Content-Type') || 'image/jpeg'
+        await env.BUCKET.put(objectKey, request.body, {
+          httpMetadata: { contentType },
+          customMetadata: {
+            tenant_id: tenantSettings.data.client_id,
+            uploaded_at: new Date().toISOString(),
+          }
+        })
+
+        return new Response(JSON.stringify({ success: true, key: objectKey }), {
+          status: 200,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
       } catch (err) {
-        const isAuthError = err.message === 'UNAUTHORIZED_DOMAIN' || err.message === 'TENANT_SUSPENDED'
-        if (isAuthError) {
-          return new Response(JSON.stringify({ error: err.message }), {
-            status: 403,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-        throw err
+        console.error('[image-proxy] Upload failure:', err)
+        return new Response(JSON.stringify({ error: 'Upload failed' }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
       }
+    }
+
+    try {
 
       const { features } = tenantSettings.data
       const watermarkEnabled = features?.enable_watermark || false

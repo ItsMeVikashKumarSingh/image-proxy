@@ -1,5 +1,14 @@
 # image-proxy — Version History
 
+## VERSION 1.4.0 (2026-04-05) - Secure Upload Proxy & CI/CD Fix
+- **Architecture**: Implemented **Secure Upload Proxying** (PUT /images/*).
+    - **Identity Enforcement**: Now "intercepts" all upload requests to verify the `Origin` header against the licensing database (direct Supabase Edge query).
+    - **CORS Resolution**: Eliminated the need for public R2 bucket CORS policies by proxying writes through the Worker's native R2 binding.
+- **Infrastructure**:
+    - **Wrangler v4**: Upgraded dev environment and CI/CD to latest Cloudflare standards.
+    - **GitHub Actions**: Fixed the broken pipeline by adding the `deploy` job for automatic production updates on master push.
+- **Security**: Added `tenant_id` and `uploaded_at` as custom metadata to R2 objects during the upload process.
+
 ## VERSION 1.3.0 (2026-04-05)
 
 ### Major Architecture: Native R2 Bindings
