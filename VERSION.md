@@ -1,5 +1,10 @@
 # image-proxy — Version History
 
+## VERSION 0.6.5 (2026-04-06) - Secure Sync (Exact Approach)
+- **Hardening**: Automatically deriving `B2_REGION` from `B2_ENDPOINT`.
+- **Simplification**: Removed `B2_REGION` from mandatory secrets.
+- **Security**: Generic error masking for Vault Configuration errors.
+
 ## VERSION 0.6.4 (2026-04-06) - Zero-Fallback Policy
 - **Hardening**: Removed all hardcoded default regions (e.g., `eu-central-003`) from the B2 fetcher.
 - **Validation**: Added `B2_REGION` to the mandatory secrets check. The system now fails loudly if the region is not explicitly configured.
