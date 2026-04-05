@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker: Secure Image Watermark Proxy
  * Project: wedding-image-proxy
- * Version: 1.3.0
+ * Version: 0.5.2
  *
  * Purpose:
  *   - Receives image requests from the WEDDING frontend
@@ -25,19 +25,21 @@ const CORS_HEADERS = {
  * Helper: Normalize URL to hostname or host.
  * Ported from Zorvik-Tech to ensure identical domain matching.
  */
-function getHostname(url) {
-  if (!url) return ''
+function getHostname(urlStr) {
+  if (!urlStr) return ''
   try {
-    const urlStr = url.startsWith('http') ? url : `https://${url}`
-    const urlObj = new URL(urlStr)
-    const hostname = urlObj.hostname.toLowerCase()
-    return hostname.replace(/^www\./, '')
+    const url = new URL(urlStr)
+    // Always return just the hostname (e.g., 'localhost', 'dreamland-studios.netlify.app')
+    // This strips ports and protocols for consistent DB comparison.
+    return url.hostname.toLowerCase()
   } catch {
-    return (url || '')
-      .toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/\/$/, '')
-      .replace(/^www\./, '')
+    // Fallback for simple strings or malformed origins
+    try {
+      const fixedUrl = urlStr.startsWith('http') ? urlStr : `https://${urlStr}`
+      return (new URL(fixedUrl)).hostname.toLowerCase()
+    } catch {
+      return urlStr.split('/')[2]?.split(':')[0]?.toLowerCase() || urlStr.toLowerCase()
+    }
   }
 }
 
@@ -65,9 +67,12 @@ function mergeDeep(target, source) {
  * IDENTITY-FIRST: Uses tc_id for deterministic lookup, then verifies Origin.
  */
 async function getTenantSettings(tenantId, hostname, env) {
+  const isDev = hostname === 'localhost' || hostname === '127.0.0.1'
   const cache = caches.default
   const cacheKey = new Request(`https://image-proxy-cache.local/tenant/id/${tenantId}`)
-  const cachedResponse = await cache.match(cacheKey)
+  
+  // Dev-friendly: Bypass cache for localhost to ensure real-time resolution
+  const cachedResponse = isDev ? null : await cache.match(cacheKey)
 
   if (cachedResponse) {
     const result = await cachedResponse.json()
@@ -138,6 +143,7 @@ async function getTenantSettings(tenantId, hostname, env) {
       features: mergedFeatures,
       is_maintenance: client.tc_is_maintenance || false,
       licensedDomains: licensedDomains,
+      hostname: hostname,
     }
   }
 
@@ -165,7 +171,7 @@ export default {
 
     // -- Health check endpoint --
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.5.0' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.5.2' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -177,7 +183,7 @@ export default {
         status: 'running',
         service: 'wedding-image-proxy',
         message: 'Wedding Image Proxy — Active and Running',
-        version: '0.5.0',
+        version: '0.5.2',
       }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -218,15 +224,23 @@ export default {
       tenantSettings = await getTenantSettings(tenantId, hostname, env)
     } catch (err) {
       const isAuthError = err.message === 'UNAUTHORIZED_DOMAIN' || err.message === 'TENANT_SUSPENDED' || err.message === 'TENANT_NOT_FOUND'
+      const debugHeaders = {
+        ...CORS_HEADERS,
+        'Content-Type': 'application/json',
+        'X-Error-Reason': err.message,
+        'X-Debug-Tenant-ID': tenantId || 'none',
+        'X-Debug-Resolved-Host': hostname || 'unknown',
+      }
+
       if (isAuthError) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 403,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'X-Error-Reason': err.message },
+          headers: debugHeaders,
         })
       }
       return new Response(JSON.stringify({ error: 'Tenant verification failed', details: err.message }), {
         status: 406,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'X-Error-Reason': 'SYSTEM_ERROR' },
+        headers: { ...debugHeaders, 'X-Error-Reason': 'SYSTEM_ERROR' },
       })
     }
 
