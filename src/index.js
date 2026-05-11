@@ -120,6 +120,28 @@ async function getTenantSettings(tenantId, hostname, env) {
 
   const mergedFeatures = mergeDeep(planFeatures, client.tc_feature_overrides || {})
 
+  // Fetch site settings from studio schema
+  const studioHeaders = {
+    'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
+    'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    'Accept-Profile': 'studio',
+  }
+  const settingsUrl = `${env.SUPABASE_URL}/rest/v1/tbl_site_settings?client_id=eq.${client.tc_id}&tss_key=in.(watermark_enabled,watermark_url)&tss_deleted_flag=eq.false`
+  const settingsResp = await fetch(settingsUrl, { headers: studioHeaders })
+  const watermarkSettings = { watermark_enabled: 'false', watermark_url: '' }
+  if (settingsResp.ok) {
+    const settingsList = await settingsResp.json()
+    if (Array.isArray(settingsList)) {
+      settingsList.forEach(item => {
+        if (item.tss_key === 'watermark_enabled') {
+          watermarkSettings.watermark_enabled = item.tss_value
+        } else if (item.tss_key === 'watermark_url') {
+          watermarkSettings.watermark_url = item.tss_value
+        }
+      })
+    }
+  }
+
   const result = {
     valid: true,
     data: {
@@ -128,6 +150,10 @@ async function getTenantSettings(tenantId, hostname, env) {
       is_maintenance: client.tc_is_maintenance || false,
       licensedDomains: licensedDomains,
       hostname: hostname,
+      watermark: {
+        enabled: watermarkSettings.watermark_enabled === 'true',
+        url: watermarkSettings.watermark_url,
+      }
     }
   }
 
@@ -279,8 +305,16 @@ export default {
         }
 
         // Apply Image Resizing/Watermark if enabled (only for images)
-        const { features } = tenantSettings.data
-        if (route.type === 'image' && features?.enable_watermark && features?.watermark_url) {
+        const { features, watermark } = tenantSettings.data
+        const watermarkParam = url.searchParams.get('watermark') !== 'false'
+
+        if (
+          route.type === 'image' &&
+          features?.enable_watermark &&
+          watermark?.enabled &&
+          watermark?.url &&
+          watermarkParam
+        ) {
           return new Response(object.body, {
             status: 200,
             headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
@@ -288,7 +322,7 @@ export default {
               image: {
                 width: 1920,
                 fit: 'scale-down',
-                draw: [{ url: features.watermark_url, opacity: 0.8, gravity: 'bottom-right', width: 500 }],
+                draw: [{ url: watermark.url, opacity: 0.8, gravity: 'bottom-right', width: 500 }],
               },
             },
           })
