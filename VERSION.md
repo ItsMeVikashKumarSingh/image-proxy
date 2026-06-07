@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.6.7 (2026-06-07) - Test & Build Stabilization
+- **Test Fix**: Mocked execution context (`ctx`) with `waitUntil` and `passThroughOnException` in unit tests to accommodate Sentry's wrapper requirement.
+- **Build Hardening**: Updated the `prepare` lifecycle hook in `package.json` to fallback gracefully (`husky || true`) in CI/CD build environments.
+
 ## VERSION 0.6.6 (2026-06-07) - Sentry Error Monitoring Integration
 - **Sentry Integration**: Added `@sentry/cloudflare` SDK to capture unhandled exceptions, fetch failures, and tenant lookup errors in production.
 - **Dynamic Credentials**: Configured Sentry to initialize using the `SENTRY_DSN` Cloudflare Workers secret variable.

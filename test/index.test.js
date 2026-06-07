@@ -24,6 +24,11 @@ const mockEnv = {
   BUCKET: mockBucket,
 }
 
+const mockCtx = {
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+}
+
 const supabaseClientActive = (id = 'tenant-123') => mockJsonResponse({
   tc_id: id,
   tc_domain: 'worker.dev, localhost',
@@ -44,6 +49,8 @@ beforeEach(() => {
   })
   mockBucket.get.mockReset()
   mockBucket.put.mockReset()
+  mockCtx.waitUntil.mockReset()
+  mockCtx.passThroughOnException.mockReset()
 })
 
 afterEach(() => {
@@ -55,18 +62,18 @@ afterEach(() => {
 describe('Basic Routing', () => {
   it('GET /health: returns 200 with service metadata', async () => {
     const req = new Request('https://worker.dev/health')
-    const res = await worker.fetch(req, mockEnv, {})
+    const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.version).toBe('0.5.0')
+    expect(body.version).toBe('0.6.0')
   })
 
   it('GET /: returns 200 simple status message', async () => {
     const req = new Request('https://worker.dev/')
-    const res = await worker.fetch(req, mockEnv, {})
+    const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.version).toBe('0.5.0')
+    expect(body.version).toBe('0.6.0')
   })
 })
 
@@ -75,6 +82,7 @@ describe('Identity-First Verification (PUT)', () => {
     fetch
       .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
       .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
+      .mockResolvedValueOnce(mockJsonResponse([]))
     mockBucket.put.mockResolvedValueOnce(undefined)
 
     const req = new Request('https://worker.dev/images/tenant-123/test.jpg', {
@@ -82,9 +90,9 @@ describe('Identity-First Verification (PUT)', () => {
       headers: { 'Origin': 'http://localhost:5173', 'Content-Type': 'image/jpeg' },
       body: new Uint8Array([0x00])
     })
-    const res = await worker.fetch(req, mockEnv, {})
+    const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
-    expect(mockBucket.put).toHaveBeenCalledWith('test.jpg', expect.anything(), expect.objectContaining({
+    expect(mockBucket.put).toHaveBeenCalledWith('tenant-123/test.jpg', expect.anything(), expect.objectContaining({
       customMetadata: expect.objectContaining({ tenant_id: 'tenant-123' })
     }))
   })
@@ -96,14 +104,14 @@ describe('Identity-First Verification (PUT)', () => {
       method: 'PUT',
       headers: { 'Origin': 'https://malicious.com' }
     })
-    const res = await worker.fetch(req, mockEnv, {})
+    const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(403)
     expect((await res.json()).error).toBe('UNAUTHORIZED_DOMAIN')
   })
 
   it('rejects request (400) when tenantId is missing in path', async () => {
     const req = new Request('https://worker.dev/images/photo.jpg') // No ID segment
-    const res = await worker.fetch(req, mockEnv, {})
+    const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(400)
     expect((await res.json()).error).toMatch(/Incomplete path/)
   })
@@ -114,6 +122,7 @@ describe('Identity-First Verification (GET)', () => {
     fetch
       .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
       .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
+      .mockResolvedValueOnce(mockJsonResponse([]))
     mockBucket.get.mockResolvedValueOnce({
       body: new Uint8Array([0x00]).buffer,
       httpMetadata: { contentType: 'image/jpeg' }
@@ -122,8 +131,8 @@ describe('Identity-First Verification (GET)', () => {
     const req = new Request('https://worker.dev/images/tenant-123/photo.jpg', {
         headers: { 'Origin': 'https://worker.dev' }
     })
-    const res = await worker.fetch(req, mockEnv, {})
+    const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
-    expect(mockBucket.get).toHaveBeenCalledWith('photo.jpg')
+    expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
   })
 })

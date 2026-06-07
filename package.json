@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "wrangler deploy --dry-run",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "lint-staged": {
     "*.js": [

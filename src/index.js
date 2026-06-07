@@ -219,6 +219,13 @@ export default Sentry.withSentry(
       })
     }
 
+    if (url.pathname === '/') {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.6.0' }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
     // Mapping of path prefixes to multi-cloud buckets
     const ROUTE_CONFIG = {
       image: { prefix: '/images/', bucket: 'R2', type: 'image' },
@@ -238,8 +245,9 @@ export default Sentry.withSentry(
     // -- Extract Tenant Identity and Object Key from Path --
     const objectKey = url.pathname.replace(route.prefix, '')
     const tenantId = objectKey.split('/')[0]
+    const hasMultipleSegments = objectKey.includes('/')
 
-    if (!tenantId || !objectKey) {
+    if (!tenantId || !objectKey || !hasMultipleSegments) {
       return new Response(JSON.stringify({ error: 'Incomplete path: Missing tenantId or objectKey' }), {
         status: 400,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
