@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.6.6 (2026-06-07) - Sentry Error Monitoring Integration
+- **Sentry Integration**: Added `@sentry/cloudflare` SDK to capture unhandled exceptions, fetch failures, and tenant lookup errors in production.
+- **Dynamic Credentials**: Configured Sentry to initialize using the `SENTRY_DSN` Cloudflare Workers secret variable.
+
 ## VERSION 0.6.5 (2026-04-06) - Secure Sync (Exact Approach)
 - **Hardening**: Automatically deriving `B2_REGION` from `B2_ENDPOINT`.
 - **Simplification**: Removed `B2_REGION` from mandatory secrets.

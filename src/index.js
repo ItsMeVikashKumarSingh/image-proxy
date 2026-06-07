@@ -11,6 +11,7 @@
  */
 
 import { AwsClient } from 'aws4fetch'
+import * as Sentry from '@sentry/cloudflare'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -198,9 +199,14 @@ async function fetchFromB2(bucketName, objectKey, env) {
   return response
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url)
+export default Sentry.withSentry(
+  (env) => ({
+    dsn: env.SENTRY_DSN || undefined,
+    tracesSampleRate: 1.0,
+  }),
+  {
+    async fetch(request, env, _ctx) {
+      const url = new URL(request.url)
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS })
@@ -260,6 +266,9 @@ export default {
       if (isAuthError) {
         return new Response(JSON.stringify({ error: err.message }), { status: 403, headers: debugHeaders })
       }
+      Sentry.captureException(err, {
+        extra: { tenantId, hostname }
+      });
       return new Response(JSON.stringify({ error: 'Tenant verification failed', details: err.message }), {
         status: 406,
         headers: { ...debugHeaders, 'X-Error-Reason': 'SYSTEM_ERROR' },
@@ -347,10 +356,11 @@ export default {
       }
       return response
     } catch (error) {
+      Sentry.captureException(error);
       return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {
         status: 500,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }
   },
-}
+})
