@@ -229,6 +229,7 @@ export default Sentry.withSentry(
     // Mapping of path prefixes to multi-cloud buckets
     const ROUTE_CONFIG = {
       image: { prefix: '/images/', bucket: 'R2', type: 'image' },
+      site: { prefix: '/site/', bucket: 'SYSTEM_R2', type: 'image' },
       reel: { prefix: '/reels/', bucket: env.B2_REELS_BUCKET || 'studio-private-reels', type: 'video' },
       film: { prefix: '/films/', bucket: env.B2_FILMS_BUCKET || 'studio-private-films', type: 'video' },
       deliverable: { prefix: '/deliverables/', bucket: env.B2_PRIVATE_BUCKET || 'studio-private-deliverables', type: 'mixed' },
@@ -258,6 +259,18 @@ export default Sentry.withSentry(
     const originHeader = request.headers.get('Origin') || request.headers.get('Referer') || request.url
     const hostname = getHostname(originHeader)
 
+    // -- Edge Cache Lookup (GET requests only, exclude deliverables/private vault and dev/localhost) --
+    // Only cache image/site assets at edge (videos are range-requested and excluded from caches.default inside workers)
+    const isDev = hostname === 'localhost' || hostname === '127.0.0.1'
+    const isCacheable = request.method === 'GET' && !isDev && (route.prefix === '/images/' || route.prefix === '/site/');
+    const cache = caches.default;
+    if (isCacheable) {
+      const cachedResponse = await cache.match(request);
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+    }
+
     let tenantSettings
     try {
       tenantSettings = await getTenantSettings(tenantId, hostname, env)
@@ -284,12 +297,13 @@ export default Sentry.withSentry(
     }
 
     // -- Handle PUT (Secure Upload Proxy) --
-    // Only R2 currently supports proxy upload for images
-    if (request.method === 'PUT' && route.bucket === 'R2') {
-      if (!env.BUCKET) throw new Error('R2 Bucket binding is missing.')
+    // Only R2/SYSTEM_R2 currently supports proxy upload for images
+    if (request.method === 'PUT' && (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2')) {
+      const bucketBinding = route.bucket === 'R2' ? env.BUCKET : env.SYSTEM_BUCKET;
+      if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
       try {
         const contentType = request.headers.get('Content-Type') || 'image/jpeg'
-        await env.BUCKET.put(objectKey, request.body, {
+        await bucketBinding.put(objectKey, request.body, {
           httpMetadata: { contentType },
           customMetadata: {
             tenant_id: tenantSettings.data.client_id,
@@ -311,9 +325,10 @@ export default Sentry.withSentry(
     // -- Handle GET (Secure Retrieval) --
     try {
       let response
-      if (route.bucket === 'R2') {
-        if (!env.BUCKET) throw new Error('R2 Bucket binding is missing.')
-        const object = await env.BUCKET.get(objectKey)
+      if (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2') {
+        const bucketBinding = route.bucket === 'R2' ? env.BUCKET : env.SYSTEM_BUCKET;
+        if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
+        const object = await bucketBinding.get(objectKey)
         if (!object) {
           return new Response(JSON.stringify({ error: `Asset not found in R2: ${objectKey}` }), {
             status: 404,
@@ -332,7 +347,7 @@ export default Sentry.withSentry(
           watermark?.url &&
           watermarkParam
         ) {
-          return new Response(object.body, {
+          response = new Response(object.body, {
             status: 200,
             headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
             cf: {
@@ -343,11 +358,12 @@ export default Sentry.withSentry(
               },
             },
           })
+        } else {
+          response = new Response(object.body, {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
+          })
         }
-        response = new Response(object.body, {
-          status: 200,
-          headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
-        })
       } else {
         // Backblaze B2 Retrieval
         const b2Response = await fetchFromB2(route.bucket, objectKey, env)
@@ -357,12 +373,29 @@ export default Sentry.withSentry(
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
+        const isPublicB2 = route.prefix === '/reels/' || route.prefix === '/films/';
+        const headers = { 
+          ...CORS_HEADERS, 
+          'Content-Type': b2Response.headers.get('Content-Type') || 'video/mp4' 
+        };
+        if (isPublicB2) {
+          headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+        }
         response = new Response(b2Response.body, {
           status: 200,
-          headers: { ...CORS_HEADERS, 'Content-Type': b2Response.headers.get('Content-Type') || 'video/mp4' },
+          headers: headers,
         })
       }
-      return response
+
+      // Add Cache-Control header and write to Cloudflare Edge Cache asynchronously
+      if (isCacheable && response.ok) {
+        const cacheResponse = new Response(response.body, response);
+        cacheResponse.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+        _ctx.waitUntil(cache.put(request, cacheResponse.clone()));
+        return cacheResponse;
+      }
+
+      return response;
     } catch (error) {
       Sentry.captureException(error);
       return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {

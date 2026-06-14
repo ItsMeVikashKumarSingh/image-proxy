@@ -1,10 +1,18 @@
-# Local dev secrets — NEVER commit this file
+# Cloudflare Worker Local Dev Secrets — NEVER commit .dev.vars
 # Copy this file to .dev.vars and fill in your values.
-# .dev.vars is gitignored and runs automatically with `npm run dev`
+# .dev.vars is gitignored and runs automatically with `npx wrangler dev`
 
-# Bearer token for accessing private R2 or Backblaze B2 bucket
-BUCKET_ACCESS_TOKEN=your_bucket_access_token_here
+# --- Supabase ---
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# Zorvik tenant verification API base URL
-# Defaults to https://api.zorvik.com/api/v1/verify if not set
-LICENSE_API_BASE=https://api.zorvik.com/api/v1/verify
+# --- Backblaze B2 ---
+B2_ENDPOINT=https://s3.your-region.backblazeb2.com
+B2_APPLICATION_KEY_ID=your-key-id
+B2_APPLICATION_KEY="your-app-key"
+B2_REELS_BUCKET=studio-public-reels
+B2_FILMS_BUCKET=studio-public-films
+B2_PRIVATE_BUCKET=studio-private-deliverables
+
+# --- Monitoring ---
+SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/xxx

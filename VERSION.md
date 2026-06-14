@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.6.8 (2026-06-14) - R2 System Bucket Separation & Caching
+- **Site Assets Separation**: Added support for the `/site/` path prefix routing to a dedicated `SYSTEM_BUCKET` R2 binding (`studio-site-assets`) for system assets (logos, package covers, testimonials).
+- **Edge Cache Ingestion**: Configured Worker Cache API (`caches.default`) to cache all public `/images/` and `/site/` GET requests directly at Cloudflare's global edge to reduce B2/R2 usage. Excluded localhost/development environments and private `/deliverables/` vault requests from caching.
+
 ## VERSION 0.6.7 (2026-06-07) - Test & Build Stabilization
 - **Test Fix**: Mocked execution context (`ctx`) with `waitUntil` and `passThroughOnException` in unit tests to accommodate Sentry's wrapper requirement.
 - **Build Hardening**: Updated the `prepare` lifecycle hook in `package.json` to fallback gracefully (`husky || true`) in CI/CD build environments.
