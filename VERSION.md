@@ -1,5 +1,10 @@
 # image-proxy — Version History
 
+## VERSION 0.6.10 (2026-07-04) - AVIF/WebP Image Optimization & Dynamic Resizing
+- **AVIF/WebP Auto-Conversion**: Integrated CDN auto-formatting (`f_auto` and `q_auto` compression quality options) to serve files in modern lightweight formats (AVIF/WebP) automatically depending on client browser capabilities.
+- **Dynamic Width Resizing**: Added support for the `w` query parameter (e.g. `?w=400`) to let the frontend request size-optimized grid/thumbnail assets, reducing load times.
+- **Original Quality Downloads**: Configured retrieval logic to bypass CDNs and serve the original high-resolution, uncompressed R2 file when no width parameter is requested, ensuring original files are preserved.
+
 ## VERSION 0.6.9 (2026-07-04) - Watermark CDN Caching & PURGE Cache Purging
 - **Dynamic Watermarking Overlays**: Replaced paid Cloudflare dynamic resizing with fetch routing to ImageKit (primary) and Cloudinary (fallback) for free-tier watermark overlay processing, with automatic fallback to raw R2 images to guarantee availability.
 - **Bypass Authentication**: Added a `BYPASS_SECRET` verification flow to serve unwatermarked R2 clean assets to CDNs on cache misses.

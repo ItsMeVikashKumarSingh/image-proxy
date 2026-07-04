@@ -371,34 +371,57 @@ export default Sentry.withSentry(
         // Apply Image Resizing/Watermark if enabled (only for images)
         const { features, watermark } = tenantSettings.data
         const watermarkParam = url.searchParams.get('watermark') !== 'false'
+        const widthParam = url.searchParams.get('w')
 
-        if (
+        const isWatermarked =
           route.type === 'image' &&
           features?.enable_watermark &&
           watermark?.enabled &&
           watermark?.url &&
           watermarkParam
-        ) {
-          const cleanImageUrl = `https://${url.hostname}${route.prefix}${objectKey}?watermark=false&bypass=${env.BYPASS_SECRET}`;
-          const base64Watermark = btoa(watermark.url)
-            .replace(/\//g, '_')
-            .replace(/\+/g, '-')
-            .replace(/=/g, '');
 
-          let cdnResponse = null;
-          try {
-            const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-1920,fo-auto,l-image,i-${base64Watermark},w-400,o-80,g-bottom_right,x-15,y-15/${cleanImageUrl}`;
-            cdnResponse = await fetch(imageKitUrl);
-            if (!cdnResponse.ok) {
-              throw new Error(`ImageKit returned status ${cdnResponse.status}`);
-            }
-          } catch (err) {
-            console.error('ImageKit failed, falling back to Cloudinary:', err);
+        const isResized = route.type === 'image' && widthParam
+
+        if (isWatermarked || isResized) {
+          const w = widthParam ? parseInt(widthParam, 10) || 1920 : 1920
+          const cleanImageUrl = `https://${url.hostname}${route.prefix}${objectKey}?watermark=false&bypass=${env.BYPASS_SECRET}`
+          
+          let cdnResponse = null
+          if (isWatermarked) {
+            const base64Watermark = btoa(watermark.url)
+              .replace(/\//g, '_')
+              .replace(/\+/g, '-')
+              .replace(/=/g, '')
+            
+            const wmWidth = Math.max(80, Math.round(w * 0.2))
+            
             try {
-              const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_1920,c_limit,l_fetch:${base64Watermark},g_south_east,x_15,y_15,o_80/${encodeURIComponent(cleanImageUrl)}`;
-              cdnResponse = await fetch(cloudinaryUrl);
-            } catch (clErr) {
-              console.error('Cloudinary fallback failed:', clErr);
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,i-${base64Watermark},w-${wmWidth},o-80,g-bottom_right,x-15,y-15/${cleanImageUrl}`
+              cdnResponse = await fetch(imageKitUrl)
+              if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
+            } catch (err) {
+              console.error('ImageKit failed, falling back to Cloudinary:', err)
+              try {
+                const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_${w},c_limit,l_fetch:${base64Watermark},g_south_east,x_15,y_15,o_80/${encodeURIComponent(cleanImageUrl)}`
+                cdnResponse = await fetch(cloudinaryUrl)
+              } catch (clErr) {
+                console.error('Cloudinary fallback failed:', clErr)
+              }
+            }
+          } else {
+            // Just resizing + f_auto / q_auto (AVIF/WebP auto optimization)
+            try {
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${cleanImageUrl}`
+              cdnResponse = await fetch(imageKitUrl)
+              if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
+            } catch (err) {
+              console.error('ImageKit failed, falling back to Cloudinary:', err)
+              try {
+                const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_${w},c_limit,f_auto,q_auto/${encodeURIComponent(cleanImageUrl)}`
+                cdnResponse = await fetch(cloudinaryUrl)
+              } catch (clErr) {
+                console.error('Cloudinary fallback failed:', clErr)
+              }
             }
           }
 
@@ -409,19 +432,20 @@ export default Sentry.withSentry(
                 ...CORS_HEADERS,
                 'Content-Type': cdnResponse.headers.get('Content-Type') || object.httpMetadata?.contentType || 'image/jpeg',
               },
-            });
+            })
           } else {
-            // Safe fallback: serve un-watermarked image if both CDNs fail
+            // Safe fallback: serve un-watermarked/un-resized image from R2 directly
             response = new Response(object.body, {
               status: 200,
               headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
-            });
+            })
           }
         } else {
+          // Serve raw, full-resolution uncompressed asset directly from R2
           response = new Response(object.body, {
             status: 200,
             headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
-          });
+          })
         }
       } else {
         // Backblaze B2 Retrieval
