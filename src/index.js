@@ -219,6 +219,31 @@ export default Sentry.withSentry(
       })
     }
 
+    if (request.method === 'PURGE') {
+      const purgeSecret = request.headers.get('X-Purge-Secret')
+      if (!purgeSecret || purgeSecret !== env.PURGE_SECRET) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+        })
+      }
+      
+      const cache = caches.default
+      const cacheKeyDefault = new Request(request.url, { method: 'GET' })
+      const cacheKeyNoWatermark = new Request(request.url + '?watermark=false', { method: 'GET' })
+      
+      const deletedDefault = await cache.delete(cacheKeyDefault)
+      const deletedNoWatermark = await cache.delete(cacheKeyNoWatermark)
+      
+      return new Response(JSON.stringify({
+        success: true,
+        purged: { default: deletedDefault, clean: deletedNoWatermark }
+      }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+      })
+    }
+
     if (url.pathname === '/') {
       return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.6.0' }), {
         status: 200,
@@ -271,29 +296,36 @@ export default Sentry.withSentry(
       }
     }
 
-    let tenantSettings
-    try {
-      tenantSettings = await getTenantSettings(tenantId, hostname, env)
-    } catch (err) {
-      const isAuthError = ['UNAUTHORIZED_DOMAIN', 'TENANT_SUSPENDED', 'TENANT_NOT_FOUND'].includes(err.message)
-      const debugHeaders = {
-        ...CORS_HEADERS,
-        'Content-Type': 'application/json',
-        'X-Error-Reason': err.message,
-        'X-Debug-Tenant-ID': tenantId || 'none',
-        'X-Debug-Resolved-Host': hostname || 'unknown',
-      }
+    const bypassParam = url.searchParams.get('bypass')
+    const isBypassed = bypassParam && bypassParam === env.BYPASS_SECRET
 
-      if (isAuthError) {
-        return new Response(JSON.stringify({ error: err.message }), { status: 403, headers: debugHeaders })
+    let tenantSettings
+    if (isBypassed) {
+      tenantSettings = { data: { client_id: tenantId, features: { enable_watermark: false } } }
+    } else {
+      try {
+        tenantSettings = await getTenantSettings(tenantId, hostname, env)
+      } catch (err) {
+        const isAuthError = ['UNAUTHORIZED_DOMAIN', 'TENANT_SUSPENDED', 'TENANT_NOT_FOUND'].includes(err.message)
+        const debugHeaders = {
+          ...CORS_HEADERS,
+          'Content-Type': 'application/json',
+          'X-Error-Reason': err.message,
+          'X-Debug-Tenant-ID': tenantId || 'none',
+          'X-Debug-Resolved-Host': hostname || 'unknown',
+        }
+
+        if (isAuthError) {
+          return new Response(JSON.stringify({ error: err.message }), { status: 403, headers: debugHeaders })
+        }
+        Sentry.captureException(err, {
+          extra: { tenantId, hostname }
+        });
+        return new Response(JSON.stringify({ error: 'Tenant verification failed', details: err.message }), {
+          status: 406,
+          headers: { ...debugHeaders, 'X-Error-Reason': 'SYSTEM_ERROR' },
+        })
       }
-      Sentry.captureException(err, {
-        extra: { tenantId, hostname }
-      });
-      return new Response(JSON.stringify({ error: 'Tenant verification failed', details: err.message }), {
-        status: 406,
-        headers: { ...debugHeaders, 'X-Error-Reason': 'SYSTEM_ERROR' },
-      })
     }
 
     // -- Handle PUT (Secure Upload Proxy) --
@@ -347,22 +379,49 @@ export default Sentry.withSentry(
           watermark?.url &&
           watermarkParam
         ) {
-          response = new Response(object.body, {
-            status: 200,
-            headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
-            cf: {
-              image: {
-                width: 1920,
-                fit: 'scale-down',
-                draw: [{ url: watermark.url, opacity: 0.8, gravity: 'bottom-right', width: 500 }],
+          const cleanImageUrl = `https://${url.hostname}${route.prefix}${objectKey}?watermark=false&bypass=${env.BYPASS_SECRET}`;
+          const base64Watermark = btoa(watermark.url)
+            .replace(/\//g, '_')
+            .replace(/\+/g, '-')
+            .replace(/=/g, '');
+
+          let cdnResponse = null;
+          try {
+            const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-1920,fo-auto,l-image,i-${base64Watermark},w-400,o-80,g-bottom_right,x-15,y-15/${cleanImageUrl}`;
+            cdnResponse = await fetch(imageKitUrl);
+            if (!cdnResponse.ok) {
+              throw new Error(`ImageKit returned status ${cdnResponse.status}`);
+            }
+          } catch (err) {
+            console.error('ImageKit failed, falling back to Cloudinary:', err);
+            try {
+              const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_1920,c_limit,l_fetch:${base64Watermark},g_south_east,x_15,y_15,o_80/${encodeURIComponent(cleanImageUrl)}`;
+              cdnResponse = await fetch(cloudinaryUrl);
+            } catch (clErr) {
+              console.error('Cloudinary fallback failed:', clErr);
+            }
+          }
+
+          if (cdnResponse && cdnResponse.ok) {
+            response = new Response(cdnResponse.body, {
+              status: 200,
+              headers: {
+                ...CORS_HEADERS,
+                'Content-Type': cdnResponse.headers.get('Content-Type') || object.httpMetadata?.contentType || 'image/jpeg',
               },
-            },
-          })
+            });
+          } else {
+            // Safe fallback: serve un-watermarked image if both CDNs fail
+            response = new Response(object.body, {
+              status: 200,
+              headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
+            });
+          }
         } else {
           response = new Response(object.body, {
             status: 200,
             headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
-          })
+          });
         }
       } else {
         // Backblaze B2 Retrieval

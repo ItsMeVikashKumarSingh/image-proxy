@@ -1,5 +1,10 @@
 # image-proxy — Version History
 
+## VERSION 0.6.9 (2026-07-04) - Watermark CDN Caching & PURGE Cache Purging
+- **Dynamic Watermarking Overlays**: Replaced paid Cloudflare dynamic resizing with fetch routing to ImageKit (primary) and Cloudinary (fallback) for free-tier watermark overlay processing, with automatic fallback to raw R2 images to guarantee availability.
+- **Bypass Authentication**: Added a `BYPASS_SECRET` verification flow to serve unwatermarked R2 clean assets to CDNs on cache misses.
+- **Cache PURGE Route**: Implemented a `PURGE` HTTP method route to invalidate Cloudflare Edge cache entries for both watermarked and clean versions.
+
 ## VERSION 0.6.8 (2026-06-14) - R2 System Bucket Separation & Caching
 - **Site Assets Separation**: Added support for the `/site/` path prefix routing to a dedicated `SYSTEM_BUCKET` R2 binding (`studio-site-assets`) for system assets (logos, package covers, testimonials).
 - **Edge Cache Ingestion**: Configured Worker Cache API (`caches.default`) to cache all public `/images/` and `/site/` GET requests directly at Cloudflare's global edge to reduce B2/R2 usage. Excluded localhost/development environments and private `/deliverables/` vault requests from caching.
