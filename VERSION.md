@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.6.11 (2026-07-05) - Supabase Storage Platform Assets Caching & Bypass
+- **Platform Assets Caching**: Added the `/assets/` route prefix to cache Zorvik Tech platform assets from the `zorvik-assets` Supabase Storage bucket.
+- **Tenant Validation Bypass**: Configured platform assets to bypass multi-tenant domain and license authorization checks, permitting platform-wide asset retrieval and Edge caching.
+
 ## VERSION 0.6.10 (2026-07-04) - AVIF/WebP Image Optimization & Dynamic Resizing
 - **AVIF/WebP Auto-Conversion**: Integrated CDN auto-formatting (`f_auto` and `q_auto` compression quality options) to serve files in modern lightweight formats (AVIF/WebP) automatically depending on client browser capabilities.
 - **Dynamic Width Resizing**: Added support for the `w` query parameter (e.g. `?w=400`) to let the frontend request size-optimized grid/thumbnail assets, reducing load times.
