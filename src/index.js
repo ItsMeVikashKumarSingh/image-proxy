@@ -378,6 +378,7 @@ export default Sentry.withSentry(
         const isWatermarked =
           route.type === 'image' &&
           features?.enable_watermark &&
+          features?.enable_custom_watermark !== false &&
           watermark?.enabled &&
           watermark?.url &&
           watermarkParam

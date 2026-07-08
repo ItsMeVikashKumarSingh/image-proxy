@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.0 (2026-07-08) - Plan-based Custom Watermark Restrictions
+- **Custom Watermark Plan Restrictions**: Ignore settings custom watermark URL if `enable_custom_watermark` is false in the tenant features, serving raw images instead of custom watermarked ones.
+
 ## VERSION 0.6.11 (2026-07-05) - Supabase Storage Platform Assets Caching & Bypass
 - **Platform Assets Caching**: Added the `/assets/` route prefix to cache Zorvik Tech platform assets from the `zorvik-assets` Supabase Storage bucket.
 - **Tenant Validation Bypass**: Configured platform assets to bypass multi-tenant domain and license authorization checks, permitting platform-wide asset retrieval and Edge caching.
