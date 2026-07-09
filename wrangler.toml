@@ -30,9 +30,18 @@ bucket_name = "studio-site-assets"
 
 # Secrets are NOT stored here.
 # Set them via CLI before deploying:
-#   wrangler secret put SUPABASE_URL
 #   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 #
 # For local dev, create a .dev.vars file (DO NOT COMMIT):
 #   SUPABASE_URL=https://your-project.supabase.co
 #   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+
+[vars]
+SUPABASE_URL = "https://ebdqpcankdxjoasvksbx.supabase.co"
+B2_ENDPOINT = "https://s3.eu-central-003.backblazeb2.com"
+B2_APPLICATION_KEY_ID = "0032e9d6782d1920000000002"
+B2_REELS_BUCKET = "studio-public-reels"
+B2_FILMS_BUCKET = "studio-public-films"
+B2_PRIVATE_BUCKET = "studio-private-deliverables"
+IMAGEKIT_ID = "sqzrx4ir2d"
+CLOUDINARY_CLOUD_NAME = "dpurstldz"

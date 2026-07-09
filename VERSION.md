@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.1 (2026-07-10) - Production Supabase URL & Public Variables Config
+- **Public Environment Variables**: Declared all public variables under the `[vars]` block in `wrangler.toml` (including production `SUPABASE_URL`, `B2_ENDPOINT`, bucket names, and CDNs) to ensure they are automatically deployed and prevent 500 retrieval errors.
+- **Local Dev Variables**: Updated local `.dev.vars` file to target the production Supabase project (`ebdqpcankdxjoasvksbx`).
+
 ## VERSION 0.7.0 (2026-07-08) - Plan-based Custom Watermark Restrictions
 - **Custom Watermark Plan Restrictions**: Ignore settings custom watermark URL if `enable_custom_watermark` is false in the tenant features, serving raw images instead of custom watermarked ones.
 
