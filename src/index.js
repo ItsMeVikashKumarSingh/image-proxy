@@ -85,7 +85,8 @@ async function getTenantSettings(tenantId, hostname, env) {
   const clientResp = await fetch(clientUrl, { headers })
 
   if (!clientResp.ok) {
-    if (clientResp.status === 406 || clientResp.status === 404) {
+    const status = Number(clientResp.status)
+    if (status === 406 || status === 404) {
       throw new Error('TENANT_NOT_FOUND')
     }
     throw new Error(`Supabase Client lookup failed: ${clientResp.statusText}`)
