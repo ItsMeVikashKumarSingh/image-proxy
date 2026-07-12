@@ -22,6 +22,7 @@ const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'test-key',
   BUCKET: mockBucket,
+  BYPASS_SECRET: 'test-bypass-secret',
 }
 
 const mockCtx = {
@@ -133,6 +134,20 @@ describe('Identity-First Verification (GET)', () => {
     })
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
+    expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
+  })
+
+  it('serves image when path-based bypass token is present', async () => {
+    mockBucket.get.mockResolvedValueOnce({
+      body: new Uint8Array([0x00]).buffer,
+      httpMetadata: { contentType: 'image/jpeg' }
+    })
+
+    // Request path contains standard /bypass/test-bypass-secret suffix
+    const req = new Request('https://worker.dev/images/tenant-123/photo.jpg/bypass/test-bypass-secret')
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+    // Verify it retrieves standard cleaned object key without standard suffix
     expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
   })
 })

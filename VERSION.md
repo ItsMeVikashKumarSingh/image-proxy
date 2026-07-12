@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.5 (2026-07-12) - Secure Path-Based Bypass & Corrected ImageKit Syntax
+- **Path-Based Bypass Security**: Implemented standard secure path-based bypass mechanism for ImageKit (`/bypass/SECRET` suffix). This avoids query parameter stripping issues while remaining completely secure against User-Agent spoofing.
+- **Corrected ImageKit Transformations**: Fixed standard watermark transformation properties (`ie-`, `lfo-bottom_right`, `lx-15,ly-15`, and standard mandatory `l-end` closing tag).
+
 ## VERSION 0.7.4 (2026-07-12) - URL Encoding & Environment Preservation
 - **ImageKit URL Encoding**: URL-encoded the `cleanImageUrl` in all `ik.imagekit.io` fetch requests. This ensures query parameters (such as `bypass` and `watermark`) are passed correctly in the path segment instead of being parsed as ImageKit query parameters, preventing ImageKit `status 400` errors.
 - **Environment Variables Preservation**: Configured `keep_vars = true` in `wrangler.toml` to prevent wrangler deployments from resetting or overwriting environment variables configured manually on the Cloudflare dashboard.

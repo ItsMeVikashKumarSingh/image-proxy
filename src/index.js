@@ -273,10 +273,23 @@ export default Sentry.withSentry(
     // -- Extract Tenant Identity and Object Key from Path --
     const objectKey = url.pathname.replace(route.prefix, '')
     const isPlatformAsset = route.bucket === 'SUPABASE_STORAGE'
-    const tenantId = isPlatformAsset ? 'platform' : objectKey.split('/')[0]
-    const hasMultipleSegments = isPlatformAsset ? true : objectKey.includes('/')
 
-    if (!tenantId || !objectKey || !hasMultipleSegments) {
+    let cleanObjectKey = objectKey
+    let isBypassed = false
+    const bypassSuffix = `/bypass/${env.BYPASS_SECRET}`
+    if (env.BYPASS_SECRET && objectKey.endsWith(bypassSuffix)) {
+      isBypassed = true
+      cleanObjectKey = objectKey.slice(0, -bypassSuffix.length)
+    }
+    const bypassParam = url.searchParams.get('bypass')
+    if (bypassParam && bypassParam === env.BYPASS_SECRET) {
+      isBypassed = true
+    }
+
+    const tenantId = isPlatformAsset ? 'platform' : cleanObjectKey.split('/')[0]
+    const hasMultipleSegments = isPlatformAsset ? true : cleanObjectKey.includes('/')
+
+    if (!tenantId || !cleanObjectKey || !hasMultipleSegments) {
       return new Response(JSON.stringify({ error: 'Incomplete path: Missing tenantId or objectKey' }), {
         status: 400,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -299,8 +312,7 @@ export default Sentry.withSentry(
       }
     }
 
-    const bypassParam = url.searchParams.get('bypass')
-    const isBypassed = bypassParam && bypassParam === env.BYPASS_SECRET
+    // bypass checks performed during path extraction
 
     let tenantSettings
     if (isPlatformAsset || isBypassed) {
@@ -338,14 +350,14 @@ export default Sentry.withSentry(
       if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
       try {
         const contentType = request.headers.get('Content-Type') || 'image/jpeg'
-        await bucketBinding.put(objectKey, request.body, {
+        await bucketBinding.put(cleanObjectKey, request.body, {
           httpMetadata: { contentType },
           customMetadata: {
             tenant_id: tenantSettings.data.client_id,
             uploaded_at: new Date().toISOString(),
           }
         })
-        return new Response(JSON.stringify({ success: true, key: objectKey }), {
+        return new Response(JSON.stringify({ success: true, key: cleanObjectKey }), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
@@ -363,9 +375,9 @@ export default Sentry.withSentry(
       if (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2') {
         const bucketBinding = route.bucket === 'R2' ? env.BUCKET : env.SYSTEM_BUCKET;
         if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
-        const object = await bucketBinding.get(objectKey)
+        const object = await bucketBinding.get(cleanObjectKey)
         if (!object) {
-          return new Response(JSON.stringify({ error: `Asset not found in R2: ${objectKey}` }), {
+          return new Response(JSON.stringify({ error: `Asset not found in R2: ${cleanObjectKey}` }), {
             status: 404,
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
@@ -388,7 +400,8 @@ export default Sentry.withSentry(
 
         if (isWatermarked || isResized) {
           const w = widthParam ? parseInt(widthParam, 10) || 1920 : 1920
-          const cleanImageUrl = `https://${url.hostname}${route.prefix}${objectKey}?watermark=false&bypass=${env.BYPASS_SECRET}`
+          const cleanImageUrl = `https://${url.hostname}${route.prefix}${cleanObjectKey}?watermark=false&bypass=${env.BYPASS_SECRET}`
+          const imageKitPath = `${route.prefix.slice(1)}${cleanObjectKey}/bypass/${env.BYPASS_SECRET || ''}`
           
           let cdnResponse = null
           if (isWatermarked) {
@@ -409,7 +422,7 @@ export default Sentry.withSentry(
             const wmWidth = Math.max(80, Math.round(w * 0.2))
             
             try {
-              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,i-${base64Watermark},w-${wmWidth},o-80,g-bottom_right,x-15,y-15/${encodeURIComponent(cleanImageUrl)}`
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,ie-${base64Watermark},w-${wmWidth},o-80,lfo-bottom_right,lx-15,ly-15,l-end/${imageKitPath}`
               cdnResponse = await fetch(imageKitUrl)
               if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
             } catch (err) {
@@ -424,7 +437,7 @@ export default Sentry.withSentry(
           } else {
             // Just resizing + f_auto / q_auto (AVIF/WebP auto optimization)
             try {
-              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${encodeURIComponent(cleanImageUrl)}`
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${imageKitPath}`
               cdnResponse = await fetch(imageKitUrl)
               if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
             } catch (err) {
@@ -461,14 +474,14 @@ export default Sentry.withSentry(
           })
         }
       } else if (route.bucket === 'SUPABASE_STORAGE') {
-        const supabaseStorageUrl = `${env.SUPABASE_URL}/storage/v1/object/authenticated/zorvik-assets/${objectKey}`
+        const supabaseStorageUrl = `${env.SUPABASE_URL}/storage/v1/object/authenticated/zorvik-assets/${cleanObjectKey}`
         const supabaseHeaders = {
           'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
           'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
         }
         const supabaseResponse = await fetch(supabaseStorageUrl, { headers: supabaseHeaders })
         if (!supabaseResponse.ok) {
-          return new Response(JSON.stringify({ error: `Asset not found in Supabase Storage: ${objectKey}` }), {
+          return new Response(JSON.stringify({ error: `Asset not found in Supabase Storage: ${cleanObjectKey}` }), {
             status: supabaseResponse.status,
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
@@ -479,11 +492,12 @@ export default Sentry.withSentry(
 
         if (isResized) {
           const w = parseInt(widthParam, 10) || 1920
-          const cleanImageUrl = `https://${url.hostname}${route.prefix}${objectKey}?bypass=${env.BYPASS_SECRET}`
+          const cleanImageUrl = `https://${url.hostname}${route.prefix}${cleanObjectKey}?bypass=${env.BYPASS_SECRET}`
+          const imageKitPath = `${route.prefix.slice(1)}${cleanObjectKey}/bypass/${env.BYPASS_SECRET || ''}`
           
           let cdnResponse = null
           try {
-            const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${encodeURIComponent(cleanImageUrl)}`
+            const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${imageKitPath}`
             cdnResponse = await fetch(imageKitUrl)
             if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
           } catch (err) {
@@ -518,9 +532,9 @@ export default Sentry.withSentry(
         }
       } else {
         // Backblaze B2 Retrieval
-        const b2Response = await fetchFromB2(route.bucket, objectKey, env)
+        const b2Response = await fetchFromB2(route.bucket, cleanObjectKey, env)
         if (!b2Response.ok) {
-          return new Response(JSON.stringify({ error: `Asset not found in B2 (${route.bucket}): ${objectKey}` }), {
+          return new Response(JSON.stringify({ error: `Asset not found in B2 (${route.bucket}): ${cleanObjectKey}` }), {
             status: b2Response.status,
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
