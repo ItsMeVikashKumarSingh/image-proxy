@@ -150,4 +150,18 @@ describe('Identity-First Verification (GET)', () => {
     // Verify it retrieves standard cleaned object key without standard suffix
     expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
   })
+
+  it('serves image when path-based bypass token is present as infix', async () => {
+    mockBucket.get.mockResolvedValueOnce({
+      body: new Uint8Array([0x00]).buffer,
+      httpMetadata: { contentType: 'image/jpeg' }
+    })
+
+    // Request path contains standard /bypass/test-bypass-secret/ infix
+    const req = new Request('https://worker.dev/images/tenant-123/bypass/test-bypass-secret/photo.jpg')
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+    // Verify it retrieves standard cleaned object key with standard infix removed
+    expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
+  })
 })

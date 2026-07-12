@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.6 (2026-07-12) - Infix Path-Based Bypass & Extension Preservation
+- **Infix Path-Based Bypass**: Relocated standard bypass token to standard middle of standard path as standard directory segment (`/bypass/SECRET/filename.ext`). This ensures standard path always ends with standard correct image file extension (e.g., `.png`, `.jpg`), preventing CDNs like ImageKit from returning 404 due to extension parsing failures.
+- **Relative Path Watermark Overlay**: Modified ImageKit watermark overlay syntax to reference standard relative path of standard watermark image instead of an absolute external URL, complying with ImageKit's connected origin policy.
+
 ## VERSION 0.7.5 (2026-07-12) - Secure Path-Based Bypass & Corrected ImageKit Syntax
 - **Path-Based Bypass Security**: Implemented standard secure path-based bypass mechanism for ImageKit (`/bypass/SECRET` suffix). This avoids query parameter stripping issues while remaining completely secure against User-Agent spoofing.
 - **Corrected ImageKit Transformations**: Fixed standard watermark transformation properties (`ie-`, `lfo-bottom_right`, `lx-15,ly-15`, and standard mandatory `l-end` closing tag).

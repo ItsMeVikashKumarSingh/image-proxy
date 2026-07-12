@@ -276,11 +276,19 @@ export default Sentry.withSentry(
 
     let cleanObjectKey = objectKey
     let isBypassed = false
+
+    const bypassInfix = `/bypass/${env.BYPASS_SECRET}/`
+    if (env.BYPASS_SECRET && objectKey.includes(bypassInfix)) {
+      isBypassed = true
+      cleanObjectKey = objectKey.replace(bypassInfix, '/')
+    }
+
     const bypassSuffix = `/bypass/${env.BYPASS_SECRET}`
     if (env.BYPASS_SECRET && objectKey.endsWith(bypassSuffix)) {
       isBypassed = true
       cleanObjectKey = objectKey.slice(0, -bypassSuffix.length)
     }
+
     const bypassParam = url.searchParams.get('bypass')
     if (bypassParam && bypassParam === env.BYPASS_SECRET) {
       isBypassed = true
@@ -401,7 +409,11 @@ export default Sentry.withSentry(
         if (isWatermarked || isResized) {
           const w = widthParam ? parseInt(widthParam, 10) || 1920 : 1920
           const cleanImageUrl = `https://${url.hostname}${route.prefix}${cleanObjectKey}?watermark=false&bypass=${env.BYPASS_SECRET}`
-          const imageKitPath = `${route.prefix.slice(1)}${cleanObjectKey}/bypass/${env.BYPASS_SECRET || ''}`
+          
+          const parts = cleanObjectKey.split('/')
+          const filename = parts.pop()
+          const dirPath = parts.join('/')
+          const imageKitPath = `${route.prefix.slice(1)}${dirPath}/bypass/${env.BYPASS_SECRET || ''}/${filename}`
           
           let cdnResponse = null
           if (isWatermarked) {
@@ -414,21 +426,36 @@ export default Sentry.withSentry(
               // fallback
             }
 
-            const base64Watermark = btoa(authorizedWatermarkUrl)
+            const cloudinaryBase64Watermark = btoa(authorizedWatermarkUrl)
               .replace(/\//g, '_')
               .replace(/\+/g, '-')
               .replace(/=/g, '')
+
+            let imageKitWatermarkPath = ''
+            try {
+              const wmUrlObj = new URL(watermark.url)
+              const wmPathname = wmUrlObj.pathname
+              const wmRelativePath = wmPathname.startsWith('/') ? wmPathname.slice(1) : wmPathname
+              const wmParts = wmRelativePath.split('/')
+              const wmFilename = wmParts.pop()
+              const wmDirPath = wmParts.join('/')
+              imageKitWatermarkPath = `${wmDirPath}/bypass/${env.BYPASS_SECRET || ''}/${wmFilename}`
+            } catch (_e) {
+              imageKitWatermarkPath = watermark.url
+            }
+
+            const imageKitBase64Watermark = encodeURIComponent(btoa(imageKitWatermarkPath))
             
             const wmWidth = Math.max(80, Math.round(w * 0.2))
             
             try {
-              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,ie-${base64Watermark},w-${wmWidth},o-80,lfo-bottom_right,lx-15,ly-15,l-end/${imageKitPath}`
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,ie-${imageKitBase64Watermark},w-${wmWidth},o-80,lfo-bottom_right,lx-15,ly-15,l-end/${imageKitPath}`
               cdnResponse = await fetch(imageKitUrl)
               if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
             } catch (err) {
               console.error('ImageKit failed, falling back to Cloudinary:', err)
               try {
-                const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_${w},c_limit,l_fetch:${base64Watermark},g_south_east,x_15,y_15,o_80/${encodeURIComponent(cleanImageUrl)}`
+                const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_${w},c_limit,l_fetch:${cloudinaryBase64Watermark},g_south_east,x_15,y_15,o_80/${encodeURIComponent(cleanImageUrl)}`
                 cdnResponse = await fetch(cloudinaryUrl)
               } catch (clErr) {
                 console.error('Cloudinary fallback failed:', clErr)
@@ -493,7 +520,10 @@ export default Sentry.withSentry(
         if (isResized) {
           const w = parseInt(widthParam, 10) || 1920
           const cleanImageUrl = `https://${url.hostname}${route.prefix}${cleanObjectKey}?bypass=${env.BYPASS_SECRET}`
-          const imageKitPath = `${route.prefix.slice(1)}${cleanObjectKey}/bypass/${env.BYPASS_SECRET || ''}`
+          const parts = cleanObjectKey.split('/')
+          const filename = parts.pop()
+          const dirPath = parts.join('/')
+          const imageKitPath = `${route.prefix.slice(1)}${dirPath}/bypass/${env.BYPASS_SECRET || ''}/${filename}`
           
           let cdnResponse = null
           try {
