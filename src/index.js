@@ -392,7 +392,16 @@ export default Sentry.withSentry(
           
           let cdnResponse = null
           if (isWatermarked) {
-            const base64Watermark = btoa(watermark.url)
+            let authorizedWatermarkUrl = watermark.url
+            try {
+              const wmUrlObj = new URL(watermark.url)
+              wmUrlObj.searchParams.set('bypass', env.BYPASS_SECRET)
+              authorizedWatermarkUrl = wmUrlObj.toString()
+            } catch (_e) {
+              // fallback
+            }
+
+            const base64Watermark = btoa(authorizedWatermarkUrl)
               .replace(/\//g, '_')
               .replace(/\+/g, '-')
               .replace(/=/g, '')

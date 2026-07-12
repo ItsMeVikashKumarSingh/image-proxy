@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.3 (2026-07-12) - Authorize Watermark URL Fetches
+- **Watermark Fetch Authorization**: Appended standard `bypass` query token to standard `watermark.url` before encoding it for ImageKit/Cloudinary. This authorizes the subsequent GET requests made by standard image transformation CDNs back to standard image proxy to fetch standard watermark overlay, avoiding `403 Unauthorized` failures.
+
 ## VERSION 0.7.2 (2026-07-11) - Fix Tenant Lookup Status Parsing
 - **Status Type Parsing**: Cast `clientResp.status` to a number in `getTenantSettings()` to avoid comparison failures against numeric `406`/`404` values due to potential string status wrapping (e.g. from `@sentry/cloudflare` instrumentation).
 
