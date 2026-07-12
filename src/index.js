@@ -219,16 +219,18 @@ async function logRequestToDb(request, status, error, env) {
     const headers = {
       'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
       'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-      'Accept-Profile': 'management'
+      'Content-Type': 'application/json'
     }
-    await fetch(`${env.SUPABASE_URL}/rest/v1/imagekit_requests`, {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/imagekit_requests`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
     })
-  } catch (_err) {
-    // ignore logging failure
+    if (!res.ok) {
+      console.error(`Failed to log request to Supabase: ${res.status} ${await res.text()}`)
+    }
+  } catch (err) {
+    console.error('Failed to log request to Supabase:', err)
   }
 }
 

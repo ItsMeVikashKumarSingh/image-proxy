@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.8 (2026-07-12) - Move Temporary Logger to Public Schema
+- **Public Schema Logging**: Moved the temporary debug logging endpoint to the public schema to ensure successful POST queries. Added standard error logging for diagnostics.
+
 ## VERSION 0.7.7 (2026-07-12) - Temporary Debug Logger for ImageKit Requests
 - **Incoming Request Logging**: Added temporary database logging of incoming requests to `/images/` paths to troubleshoot CDN routing in production.
 
