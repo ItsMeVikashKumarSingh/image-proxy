@@ -209,12 +209,12 @@ async function logRequestToDb(request, status, error, env) {
     for (const [key, val] of request.headers.entries()) {
       headersObj[key] = val
     }
-    const body = {
+        const body = {
       url: request.url,
       method: request.method,
       headers: headersObj,
       status: status || 0,
-      error: error || null
+      error: error || `IK_ID: ${env.IMAGEKIT_ID || 'none'}`
     }
     const headers = {
       'apikey': env.SUPABASE_SERVICE_ROLE_KEY,

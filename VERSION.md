@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.9 (2026-07-12) - Log IMAGEKIT_ID environment variable
+- **Log Environment Variable**: Added standard env.IMAGEKIT_ID variable to the temporary database logs to verify standard production value.
+
 ## VERSION 0.7.8 (2026-07-12) - Move Temporary Logger to Public Schema
 - **Public Schema Logging**: Moved the temporary debug logging endpoint to the public schema to ensure successful POST queries. Added standard error logging for diagnostics.
 
