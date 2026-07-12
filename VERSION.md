@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.4 (2026-07-12) - URL Encoding & Environment Preservation
+- **ImageKit URL Encoding**: URL-encoded the `cleanImageUrl` in all `ik.imagekit.io` fetch requests. This ensures query parameters (such as `bypass` and `watermark`) are passed correctly in the path segment instead of being parsed as ImageKit query parameters, preventing ImageKit `status 400` errors.
+- **Environment Variables Preservation**: Configured `keep_vars = true` in `wrangler.toml` to prevent wrangler deployments from resetting or overwriting environment variables configured manually on the Cloudflare dashboard.
+
 ## VERSION 0.7.3 (2026-07-12) - Authorize Watermark URL Fetches
 - **Watermark Fetch Authorization**: Appended standard `bypass` query token to standard `watermark.url` before encoding it for ImageKit/Cloudinary. This authorizes the subsequent GET requests made by standard image transformation CDNs back to standard image proxy to fetch standard watermark overlay, avoiding `403 Unauthorized` failures.
 

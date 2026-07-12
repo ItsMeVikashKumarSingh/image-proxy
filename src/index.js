@@ -409,7 +409,7 @@ export default Sentry.withSentry(
             const wmWidth = Math.max(80, Math.round(w * 0.2))
             
             try {
-              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,i-${base64Watermark},w-${wmWidth},o-80,g-bottom_right,x-15,y-15/${cleanImageUrl}`
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,i-${base64Watermark},w-${wmWidth},o-80,g-bottom_right,x-15,y-15/${encodeURIComponent(cleanImageUrl)}`
               cdnResponse = await fetch(imageKitUrl)
               if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
             } catch (err) {
@@ -424,7 +424,7 @@ export default Sentry.withSentry(
           } else {
             // Just resizing + f_auto / q_auto (AVIF/WebP auto optimization)
             try {
-              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${cleanImageUrl}`
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${encodeURIComponent(cleanImageUrl)}`
               cdnResponse = await fetch(imageKitUrl)
               if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
             } catch (err) {
@@ -483,7 +483,7 @@ export default Sentry.withSentry(
           
           let cdnResponse = null
           try {
-            const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${cleanImageUrl}`
+            const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${encodeURIComponent(cleanImageUrl)}`
             cdnResponse = await fetch(imageKitUrl)
             if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
           } catch (err) {
