@@ -1,5 +1,5 @@
-# wrangler.toml — image-proxy Cloudflare Worker config
-name = "image-proxy"
+# wrangler.toml — wedding-image-proxy Cloudflare Worker config
+name = "wedding-image-proxy"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]

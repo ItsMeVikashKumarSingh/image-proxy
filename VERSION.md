@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.10 (2026-07-12) - Rename Worker Back to wedding-image-proxy
+- **Worker Name Restoration**: Changed standard worker name back to `wedding-image-proxy` in `wrangler.toml` to restore DNS mapping for standard ImageKit CDN origin.
+
 ## VERSION 0.7.9 (2026-07-12) - Log IMAGEKIT_ID environment variable
 - **Log Environment Variable**: Added standard env.IMAGEKIT_ID variable to the temporary database logs to verify standard production value.
 
