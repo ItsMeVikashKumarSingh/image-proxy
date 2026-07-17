@@ -216,7 +216,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.12' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.13' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -454,7 +454,7 @@ export default Sentry.withSentry(
             const wmWidth = Math.max(80, Math.round(w * 0.2))
             
             try {
-              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,ie-${imageKitBase64Watermark},w-${wmWidth},o-80,lfo-bottom_right,lx-15,ly-15,l-end/${imageKitPath}`
+              const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,ie-${imageKitBase64Watermark},w-${wmWidth},o-80,lx-N15,ly-N15,l-end/${imageKitPath}`
               cdnResponse = await fetch(imageKitUrl)
               if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
             } catch (err) {

@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.13 (2026-07-17) - Fix Watermark Positioning to Bottom-Right
+- **Watermark Positioning**: Switched standard overlay position parameters to ImageKit's native negative offset format (`lx-N15,ly-N15`). This prevents the watermark from rendering in standard top-left corner (which occurred because ImageKit's parser was overriding `lfo-bottom_right` with standard absolute positive coordinates `lx-15,ly-15`).
+
 ## VERSION 0.7.12 (2026-07-17) - Remove Temporary Debug Logger
 - **Cleanup**: Removed temporary `logRequestToDb` debug helper and all its call sites added in v0.7.7–0.7.9 for diagnosing the ImageKit origin issue. The issue is fully resolved.
 - **Version String**: Updated `/health` endpoint to report `0.7.12`.
