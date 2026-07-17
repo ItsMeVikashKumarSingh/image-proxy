@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.11 (2026-07-17) - Fix ImageKit Double images/ Prefix Bug
+- **Root Cause Fixed**: Removed `images/` prefix from `imageKitPath` construction. ImageKit's Web Folder origin is already `https://imageproxy.zorviktech.com/images/`, so appending `images/` again caused a `404` at the CDN.
+- **Watermark Path Fixed**: Also stripped `/images/` prefix from the watermark URL pathname before sending as the `i-` layer path.
+
 ## VERSION 0.7.10 (2026-07-12) - Rename Worker Back to wedding-image-proxy
 - **Worker Name Restoration**: Changed standard worker name back to `wedding-image-proxy` in `wrangler.toml` to restore DNS mapping for standard ImageKit CDN origin.
 

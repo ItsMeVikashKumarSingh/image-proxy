@@ -451,7 +451,9 @@ export default Sentry.withSentry(
           const parts = cleanObjectKey.split('/')
           const filename = parts.pop()
           const dirPath = parts.join('/')
-          const imageKitPath = `${route.prefix.slice(1)}${dirPath}/bypass/${env.BYPASS_SECRET || ''}/${filename}`
+          // imageKitPath must be relative to the Web Folder origin base (https://imageproxy.zorviktech.com/images/)
+          // so we MUST NOT include the route prefix (e.g. 'images/') — ImageKit will prepend it from the origin config
+          const imageKitPath = `${dirPath}/bypass/${env.BYPASS_SECRET || ''}/${filename}`
           
           let cdnResponse = null
           if (isWatermarked) {
@@ -473,8 +475,9 @@ export default Sentry.withSentry(
             try {
               const wmUrlObj = new URL(watermark.url)
               const wmPathname = wmUrlObj.pathname
-              const wmRelativePath = wmPathname.startsWith('/') ? wmPathname.slice(1) : wmPathname
-              const wmParts = wmRelativePath.split('/')
+              // Strip the /images/ prefix so the watermark path is also relative to the Web Folder origin base
+              const wmStripped = wmPathname.startsWith('/images/') ? wmPathname.slice(8) : (wmPathname.startsWith('/') ? wmPathname.slice(1) : wmPathname)
+              const wmParts = wmStripped.split('/')
               const wmFilename = wmParts.pop()
               const wmDirPath = wmParts.join('/')
               imageKitWatermarkPath = `${wmDirPath}/bypass/${env.BYPASS_SECRET || ''}/${wmFilename}`
