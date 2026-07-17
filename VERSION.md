@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.15 (2026-07-17) - Reduce Watermark Scale to 12%
+- **Watermark Scaling**: Reduced standard watermark size scaling from 20% of standard base width (minimum 80px) to 12% of standard base width (minimum 60px) to make standard watermark less obtrusive and more premium in look and feel.
+
 ## VERSION 0.7.14 (2026-07-17) - Revert Worker Name in wrangler.toml to image-proxy
 - **Worker Naming**: Reverted worker name in `wrangler.toml` back to `image-proxy` to maintain standard repository consistency.
 

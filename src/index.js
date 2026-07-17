@@ -216,7 +216,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.14' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.15' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -451,7 +451,7 @@ export default Sentry.withSentry(
 
             const imageKitBase64Watermark = encodeURIComponent(btoa(imageKitWatermarkPath))
             
-            const wmWidth = Math.max(80, Math.round(w * 0.2))
+            const wmWidth = Math.max(60, Math.round(w * 0.12))
             
             try {
               const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto,l-image,ie-${imageKitBase64Watermark},w-${wmWidth},o-80,lx-N15,ly-N15,l-end/${imageKitPath}`
