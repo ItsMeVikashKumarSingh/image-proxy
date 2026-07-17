@@ -66,7 +66,7 @@ describe('Basic Routing', () => {
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.version).toBe('0.6.0')
+    expect(body.version).toMatch(/^\d+\.\d+(\.\d+)?$/)
   })
 
   it('GET /: returns 200 simple status message', async () => {

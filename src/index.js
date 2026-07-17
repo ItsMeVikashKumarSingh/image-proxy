@@ -200,39 +200,7 @@ async function fetchFromB2(bucketName, objectKey, env) {
   return response
 }
 
-async function logRequestToDb(request, status, error, env) {
-  if (env.SUPABASE_URL === 'https://test.supabase.co') {
-    return
-  }
-  try {
-    const headersObj = {}
-    for (const [key, val] of request.headers.entries()) {
-      headersObj[key] = val
-    }
-        const body = {
-      url: request.url,
-      method: request.method,
-      headers: headersObj,
-      status: status || 0,
-      error: error || `IK_ID: ${env.IMAGEKIT_ID || 'none'}`
-    }
-    const headers = {
-      'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
-      'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json'
-    }
-    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/imagekit_requests`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    })
-    if (!res.ok) {
-      console.error(`Failed to log request to Supabase: ${res.status} ${await res.text()}`)
-    }
-  } catch (err) {
-    console.error('Failed to log request to Supabase:', err)
-  }
-}
+
 
 export default Sentry.withSentry(
   (env) => ({
@@ -243,16 +211,12 @@ export default Sentry.withSentry(
     async fetch(request, env, _ctx) {
       const url = new URL(request.url)
 
-      if (url.pathname.startsWith('/images/')) {
-        _ctx.waitUntil(logRequestToDb(request, null, null, env))
-      }
-
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS })
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.6.0' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.12' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -629,21 +593,12 @@ export default Sentry.withSentry(
         const cacheResponse = new Response(response.body, response);
         cacheResponse.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
         _ctx.waitUntil(cache.put(request, cacheResponse.clone()));
-        if (url.pathname.startsWith('/images/')) {
-          _ctx.waitUntil(logRequestToDb(request, cacheResponse.status, null, env))
-        }
         return cacheResponse;
       }
 
-      if (url.pathname.startsWith('/images/')) {
-        _ctx.waitUntil(logRequestToDb(request, response.status, null, env))
-      }
       return response;
     } catch (error) {
       Sentry.captureException(error);
-      if (url.pathname.startsWith('/images/')) {
-        _ctx.waitUntil(logRequestToDb(request, 500, error.message, env))
-      }
       return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {
         status: 500,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },

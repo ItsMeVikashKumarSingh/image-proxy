@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.12 (2026-07-17) - Remove Temporary Debug Logger
+- **Cleanup**: Removed temporary `logRequestToDb` debug helper and all its call sites added in v0.7.7–0.7.9 for diagnosing the ImageKit origin issue. The issue is fully resolved.
+- **Version String**: Updated `/health` endpoint to report `0.7.12`.
+
 ## VERSION 0.7.11 (2026-07-17) - Fix ImageKit Double images/ Prefix Bug
 - **Root Cause Fixed**: Removed `images/` prefix from `imageKitPath` construction. ImageKit's Web Folder origin is already `https://imageproxy.zorviktech.com/images/`, so appending `images/` again caused a `404` at the CDN.
 - **Watermark Path Fixed**: Also stripped `/images/` prefix from the watermark URL pathname before sending as the `i-` layer path.
