@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.14 (2026-07-17) - Revert Worker Name in wrangler.toml to image-proxy
+- **Worker Naming**: Reverted worker name in `wrangler.toml` back to `image-proxy` to maintain standard repository consistency.
+
 ## VERSION 0.7.13 (2026-07-17) - Fix Watermark Positioning to Bottom-Right
 - **Watermark Positioning**: Switched standard overlay position parameters to ImageKit's native negative offset format (`lx-N15,ly-N15`). This prevents the watermark from rendering in standard top-left corner (which occurred because ImageKit's parser was overriding `lfo-bottom_right` with standard absolute positive coordinates `lx-15,ly-15`).
 

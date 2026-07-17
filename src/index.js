@@ -216,7 +216,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.13' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.14' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
