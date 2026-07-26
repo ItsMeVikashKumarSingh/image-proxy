@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.17 (2026-07-26) - B2 Private Vault Fallback Alignment (studio-private)
+- **Bucket Alignment**: Updated default fallback bucket for `/deliverables/` route prefix in `ROUTE_CONFIG` from `studio-private-deliverables` to `studio-private` to match the Backblaze B2 vault configuration.
+
 ## VERSION 0.7.16 (2026-07-26) - Authorize System Platform Domains for Direct Links & PDF Downloads
 - **Domain Authorization**: Updated domain verification logic (`isAllowedDomain`) in `getTenantSettings` to permit system platform domains (such as `imageproxy.zorviktech.com`, `*.zorviktech.com`, and requests directly hitting the proxy URL host). This resolves `UNAUTHORIZED_DOMAIN` 403 errors when users download contract PDFs or visit proxy links directly without browser `Origin`/`Referer` headers.
 

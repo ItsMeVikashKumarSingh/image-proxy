@@ -253,7 +253,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.16' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.17' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -285,7 +285,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.16' }), {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.17' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -298,7 +298,7 @@ export default Sentry.withSentry(
       assets: { prefix: '/assets/', bucket: 'SUPABASE_STORAGE', type: 'image' },
       reel: { prefix: '/reels/', bucket: env.B2_REELS_BUCKET || 'studio-private-reels', type: 'video' },
       film: { prefix: '/films/', bucket: env.B2_FILMS_BUCKET || 'studio-private-films', type: 'video' },
-      deliverable: { prefix: '/deliverables/', bucket: env.B2_PRIVATE_BUCKET || 'studio-private-deliverables', type: 'mixed' },
+      deliverable: { prefix: '/deliverables/', bucket: env.B2_PRIVATE_BUCKET || 'studio-private', type: 'mixed' },
     }
 
     const route = Object.values(ROUTE_CONFIG).find(r => url.pathname.startsWith(r.prefix))
