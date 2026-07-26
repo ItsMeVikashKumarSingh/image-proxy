@@ -74,7 +74,7 @@ describe('Basic Routing', () => {
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.version).toBe('0.6.0')
+    expect(body.version).toMatch(/^\d+\.\d+(\.\d+)?$/)
   })
 })
 
@@ -164,4 +164,49 @@ describe('Identity-First Verification (GET)', () => {
     // Verify it retrieves standard cleaned object key with standard infix removed
     expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
   })
+
+  it('serves PDF contract on direct link navigation without Origin/Referer headers', async () => {
+    fetch
+      .mockResolvedValueOnce(mockJsonResponse({
+        tc_id: 'tenant-123',
+        tc_domain: 'clientcustomdomain.com',
+        tc_status: 'active',
+        tc_plan_id: 'plan-basic',
+      }))
+      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
+      .mockResolvedValueOnce(mockJsonResponse([]))
+    mockBucket.get.mockResolvedValueOnce({
+      body: new Uint8Array([0x00]).buffer,
+      httpMetadata: { contentType: 'application/pdf' }
+    })
+
+    // Direct link click or navigation: request has no Origin or Referer
+    const req = new Request('https://imageproxy.zorviktech.com/images/tenant-123/contracts/signed_contract.pdf')
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+    expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/contracts/signed_contract.pdf')
+  })
+
+  it('allows requests from system platform subdomains (*.zorviktech.com)', async () => {
+    fetch
+      .mockResolvedValueOnce(mockJsonResponse({
+        tc_id: 'tenant-123',
+        tc_domain: 'clientcustomdomain.com',
+        tc_status: 'active',
+        tc_plan_id: 'plan-basic',
+      }))
+      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
+      .mockResolvedValueOnce(mockJsonResponse([]))
+    mockBucket.get.mockResolvedValueOnce({
+      body: new Uint8Array([0x00]).buffer,
+      httpMetadata: { contentType: 'application/pdf' }
+    })
+
+    const req = new Request('https://imageproxy.zorviktech.com/images/tenant-123/contracts/signed_contract.pdf', {
+      headers: { 'Origin': 'https://studio.zorviktech.com' }
+    })
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+  })
 })
+

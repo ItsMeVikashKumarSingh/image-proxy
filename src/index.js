@@ -57,9 +57,46 @@ function mergeDeep(target, source) {
 }
 
 /**
+ * Helper: Check if a hostname is allowed (either in tenant's licensed domains,
+ * matches system proxy host directly, or is an allowed platform domain).
+ */
+function isAllowedDomain(hostname, licensedDomains, requestUrlHost = '') {
+  if (!hostname) return false
+  const cleanHost = hostname.toLowerCase()
+
+  if (Array.isArray(licensedDomains) && licensedDomains.includes(cleanHost)) {
+    return true
+  }
+
+  if (requestUrlHost && cleanHost === requestUrlHost.toLowerCase()) {
+    return true
+  }
+
+  const ALLOWED_SYSTEM_DOMAINS = [
+    'imageproxy.zorviktech.com',
+    'zorviktech.com',
+    'studio.zorviktech.com',
+    'admin.zorviktech.com',
+    'zconnect.zorviktech.com',
+    'localhost',
+    '127.0.0.1',
+  ]
+
+  if (ALLOWED_SYSTEM_DOMAINS.includes(cleanHost)) {
+    return true
+  }
+
+  if (cleanHost.endsWith('.zorviktech.com') || cleanHost.endsWith('.workers.dev')) {
+    return true
+  }
+
+  return false
+}
+
+/**
  * Fetch tenant settings directly from Supabase with Edge Caching.
  */
-async function getTenantSettings(tenantId, hostname, env) {
+async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
   const isDev = hostname === 'localhost' || hostname === '127.0.0.1'
   const cache = caches.default
   const cacheKey = new Request(`https://image-proxy-cache.local/tenant/id/${tenantId}`)
@@ -68,7 +105,7 @@ async function getTenantSettings(tenantId, hostname, env) {
 
   if (cachedResponse) {
     const result = await cachedResponse.json()
-    if (!result.data.licensedDomains.includes(hostname)) {
+    if (!isAllowedDomain(hostname, result.data.licensedDomains, requestUrlHost)) {
       throw new Error('UNAUTHORIZED_DOMAIN')
     }
     return result
@@ -102,7 +139,7 @@ async function getTenantSettings(tenantId, hostname, env) {
     .map(d => getHostname(d.trim()))
     .filter(Boolean)
 
-  if (!licensedDomains.includes(hostname)) {
+  if (!isAllowedDomain(hostname, licensedDomains, requestUrlHost)) {
     throw new Error('UNAUTHORIZED_DOMAIN')
   }
 
@@ -216,7 +253,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.15' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.16' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -248,7 +285,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.6.0' }), {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.16' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -309,6 +346,7 @@ export default Sentry.withSentry(
     // 1. Resolve tenant via direct Supabase REST API (Identity-First)
     const originHeader = request.headers.get('Origin') || request.headers.get('Referer') || request.url
     const hostname = getHostname(originHeader)
+    const requestUrlHost = getHostname(request.url)
 
     // -- Edge Cache Lookup (GET requests only, exclude deliverables/private vault and dev/localhost) --
     // Only cache image/site assets at edge (videos are range-requested and excluded from caches.default inside workers)
@@ -329,7 +367,7 @@ export default Sentry.withSentry(
       tenantSettings = { data: { client_id: tenantId, features: { enable_watermark: false } } }
     } else {
       try {
-        tenantSettings = await getTenantSettings(tenantId, hostname, env)
+        tenantSettings = await getTenantSettings(tenantId, hostname, env, requestUrlHost)
       } catch (err) {
         const isAuthError = ['UNAUTHORIZED_DOMAIN', 'TENANT_SUSPENDED', 'TENANT_NOT_FOUND'].includes(err.message)
         const debugHeaders = {

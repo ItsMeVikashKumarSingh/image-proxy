@@ -1,5 +1,8 @@
 # image-proxy — Version History
 
+## VERSION 0.7.16 (2026-07-26) - Authorize System Platform Domains for Direct Links & PDF Downloads
+- **Domain Authorization**: Updated domain verification logic (`isAllowedDomain`) in `getTenantSettings` to permit system platform domains (such as `imageproxy.zorviktech.com`, `*.zorviktech.com`, and requests directly hitting the proxy URL host). This resolves `UNAUTHORIZED_DOMAIN` 403 errors when users download contract PDFs or visit proxy links directly without browser `Origin`/`Referer` headers.
+
 ## VERSION 0.7.15 (2026-07-17) - Reduce Watermark Scale to 12%
 - **Watermark Scaling**: Reduced standard watermark size scaling from 20% of standard base width (minimum 80px) to 12% of standard base width (minimum 60px) to make standard watermark less obtrusive and more premium in look and feel.
 
