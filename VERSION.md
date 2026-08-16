@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.18 (2026-08-16) - Fix Backblaze B2 Endpoint URL Normalization
+- **Endpoint Protocol Normalization**: Stripped leading `https://` / `http://` protocols from `env.B2_ENDPOINT` inside `fetchFromB2`. This fixes malformed S3 endpoint and Host headers (`https://<bucket>.https://...`) that previously caused 404 `Asset not found in B2` responses when downloading signed contract PDFs and private vault deliverables from Backblaze B2.
+- **Unit Tests**: Added automated unit test verifying B2 deliverable asset retrieval with full protocol-prefixed `B2_ENDPOINT`.
+
 ## VERSION 0.7.17 (2026-07-26) - B2 Private Vault Fallback Alignment (studio-private)
 - **Bucket Alignment**: Updated default fallback bucket for `/deliverables/` route prefix in `ROUTE_CONFIG` from `studio-private-deliverables` to `studio-private` to match the Backblaze B2 vault configuration.
 

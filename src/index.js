@@ -213,9 +213,12 @@ async function fetchFromB2(bucketName, objectKey, env) {
     throw new Error('Vault Configuration Error: Missing core storage credentials.')
   }
 
+  // Normalize endpoint: strip leading protocol if provided (e.g. https://s3.eu-central-003.backblazeb2.com -> s3.eu-central-003.backblazeb2.com)
+  const cleanEndpoint = env.B2_ENDPOINT.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+
   // Derive Region dynamically from Endpoint (Exact Approach)
   // s3.eu-central-003.backblazeb2.com -> eu-central-003
-  const region = env.B2_ENDPOINT.split('.')[1] || 'us-east-005'
+  const region = cleanEndpoint.split('.')[1] || 'us-east-005'
 
   const b2 = new AwsClient({
     accessKeyId: env.B2_APPLICATION_KEY_ID,
@@ -225,12 +228,12 @@ async function fetchFromB2(bucketName, objectKey, env) {
   })
 
   // Format: https://bucket.s3.region.backblazeb2.com/key
-  const url = `https://${bucketName}.${env.B2_ENDPOINT}/${objectKey}`
+  const url = `https://${bucketName}.${cleanEndpoint}/${objectKey}`
   
   const response = await b2.fetch(url, {
     method: 'GET',
     headers: {
-      'Host': `${bucketName}.${env.B2_ENDPOINT}`,
+      'Host': `${bucketName}.${cleanEndpoint}`,
     }
   })
 
@@ -253,7 +256,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.17' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.18' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -285,7 +288,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.17' }), {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.18' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })

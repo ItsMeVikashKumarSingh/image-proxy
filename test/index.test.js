@@ -208,5 +208,45 @@ describe('Identity-First Verification (GET)', () => {
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
   })
+
+  it('fetches deliverable from Backblaze B2 with protocol-prefixed B2_ENDPOINT', async () => {
+    const b2Env = {
+      ...mockEnv,
+      B2_ENDPOINT: 'https://s3.eu-central-003.backblazeb2.com',
+      B2_APPLICATION_KEY_ID: 'test-key-id',
+      B2_APPLICATION_KEY: 'test-key-secret',
+      B2_PRIVATE_BUCKET: 'studio-private-deliverables',
+    }
+
+    // Mock tenant settings lookup
+    fetch
+      .mockResolvedValueOnce(mockJsonResponse({
+        tc_id: 'tenant-123',
+        tc_domain: 'worker.dev, localhost',
+        tc_status: 'active',
+        tc_plan_id: 'plan-basic',
+      }))
+      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
+      .mockResolvedValueOnce(mockJsonResponse([]))
+      // Mock B2 S3 response
+      .mockResolvedValueOnce(new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }))
+
+    const req = new Request('https://worker.dev/deliverables/tenant-123/contracts/signed_contract.pdf', {
+      headers: { 'Origin': 'http://localhost:5173' },
+    })
+
+    const res = await worker.fetch(req, b2Env, mockCtx)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toBe('application/pdf')
+
+    // Verify fetch was called with cleaned S3 URL (without duplicate https://)
+    const b2Call = fetch.mock.calls[3]
+    const fetchedUrl = typeof b2Call[0] === 'string' ? b2Call[0] : b2Call[0].url
+    expect(fetchedUrl).toBe('https://studio-private-deliverables.s3.eu-central-003.backblazeb2.com/tenant-123/contracts/signed_contract.pdf')
+  })
 })
+
 
