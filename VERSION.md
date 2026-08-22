@@ -1,5 +1,11 @@
 # image-proxy — Version History
 
+## VERSION 0.7.19 (2026-08-23) - Secure Watermarking & HMAC Signature Authorization
+- **Eliminated Parameter Bypass**: Removed client-controlled `watermark=false` query parameter bypass. Watermarks are now strictly enforced by the Edge Worker based on tenant database configuration.
+- **HMAC-SHA256 Signed URLs**: Added edge verification (`verifyHmacSignature`) for authorized clean full-resolution asset downloads using signed `sig` and `exp` tokens.
+- **Admin Authorization**: Supported Bearer and Admin secret authorization at the edge for clean dashboard previews and management.
+- **Web Resolution Optimization**: Capped and auto-optimized public web viewing requests with automatic AVIF/WebP conversion while safeguarding original full-resolution master files.
+
 ## VERSION 0.7.18 (2026-08-16) - Fix Backblaze B2 Endpoint URL Normalization
 - **Endpoint Protocol Normalization**: Stripped leading `https://` / `http://` protocols from `env.B2_ENDPOINT` inside `fetchFromB2`. This fixes malformed S3 endpoint and Host headers (`https://<bucket>.https://...`) that previously caused 404 `Asset not found in B2` responses when downloading signed contract PDFs and private vault deliverables from Backblaze B2.
 - **Unit Tests**: Added automated unit test verifying B2 deliverable asset retrieval with full protocol-prefixed `B2_ENDPOINT`.

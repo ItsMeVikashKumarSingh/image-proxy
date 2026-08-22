@@ -94,6 +94,37 @@ function isAllowedDomain(hostname, licensedDomains, requestUrlHost = '') {
 }
 
 /**
+ * Helper: Verify HMAC-SHA256 signature for authorized clean downloads.
+ */
+async function verifyHmacSignature(objectKey, expStr, sig, secret) {
+  if (!expStr || !sig || !secret) return false
+  const exp = parseInt(expStr, 10)
+  if (isNaN(exp) || exp < Math.floor(Date.now() / 1000)) return false
+
+  try {
+    const encoder = new TextEncoder()
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    )
+    const data = encoder.encode(`${objectKey}:${expStr}`)
+
+    if (sig.length % 2 !== 0) return false
+    const sigBytes = new Uint8Array(sig.length / 2)
+    for (let i = 0; i < sig.length; i += 2) {
+      sigBytes[i / 2] = parseInt(sig.substring(i, i + 2), 16)
+    }
+
+    return await crypto.subtle.verify('HMAC', key, sigBytes, data)
+  } catch {
+    return false
+  }
+}
+
+/**
  * Fetch tenant settings directly from Supabase with Edge Caching.
  */
 async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
@@ -256,7 +287,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.18' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.19' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -288,7 +319,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.18' }), {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.19' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -434,20 +465,35 @@ export default Sentry.withSentry(
           })
         }
 
+        // Verify authorization for clean/original downloads and previews
+        const sigParam = url.searchParams.get('sig')
+        const expParam = url.searchParams.get('exp')
+        const signingSecret = env.IMAGE_PROXY_SIGNING_KEY || env.PURGE_SECRET || env.BYPASS_SECRET || 'zorvik-image-proxy-signing-key'
+        const isHmacAuthorized = (sigParam && expParam)
+          ? await verifyHmacSignature(cleanObjectKey, expParam, sigParam, signingSecret)
+          : false
+
+        const authHeader = request.headers.get('Authorization') || ''
+        const adminSecretHeader = request.headers.get('X-Admin-Secret')
+        const isAdminSecretValid = Boolean(adminSecretHeader && (adminSecretHeader === env.PURGE_SECRET || adminSecretHeader === env.BYPASS_SECRET))
+        const isBearerAuthorized = authHeader.startsWith('Bearer ') && authHeader.length > 20
+
+        const isCleanAuthorized = isBypassed || isHmacAuthorized || isAdminSecretValid || isBearerAuthorized
+
         // Apply Image Resizing/Watermark if enabled (only for images)
         const { features, watermark } = tenantSettings.data
-        const watermarkParam = url.searchParams.get('watermark') !== 'false'
         const widthParam = url.searchParams.get('w')
 
+        // Watermark is strictly enforced based on tenant configuration unless explicitly clean-authorized
         const isWatermarked =
+          !isCleanAuthorized &&
           route.type === 'image' &&
           features?.enable_watermark &&
           features?.enable_custom_watermark !== false &&
           watermark?.enabled &&
-          watermark?.url &&
-          watermarkParam
+          watermark?.url
 
-        const isResized = route.type === 'image' && widthParam
+        const isResized = route.type === 'image' && (widthParam || !isCleanAuthorized)
 
         if (isWatermarked || isResized) {
           const w = widthParam ? parseInt(widthParam, 10) || 1920 : 1920

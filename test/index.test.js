@@ -247,6 +247,38 @@ describe('Identity-First Verification (GET)', () => {
     const fetchedUrl = typeof b2Call[0] === 'string' ? b2Call[0] : b2Call[0].url
     expect(fetchedUrl).toBe('https://studio-private-deliverables.s3.eu-central-003.backblazeb2.com/tenant-123/contracts/signed_contract.pdf')
   })
+
+  it('serves clean original asset when valid HMAC signature is provided', async () => {
+    fetch
+      .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
+      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: { enable_watermark: true } }))
+      .mockResolvedValueOnce(mockJsonResponse([
+        { tss_key: 'watermark_enabled', tss_value: 'true' },
+        { tss_key: 'watermark_url', tss_value: 'https://imageproxy.zorviktech.com/images/tenant-123/watermark.png' }
+      ]))
+    mockBucket.get.mockResolvedValueOnce({
+      body: new Uint8Array([0x01, 0x02, 0x03]).buffer,
+      httpMetadata: { contentType: 'image/jpeg' }
+    })
+
+    const exp = Math.floor(Date.now() / 1000) + 3600
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode('test-bypass-secret'),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    )
+    const signatureBuffer = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`tenant-123/photo.jpg:${exp}`))
+    const sig = Array.from(new Uint8Array(signatureBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
+
+    const req = new Request(`https://worker.dev/images/tenant-123/photo.jpg?exp=${exp}&sig=${sig}`, {
+      headers: { 'Origin': 'https://worker.dev' }
+    })
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+    expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
+  })
 })
 
 
