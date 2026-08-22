@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.20 (2026-08-23) - Scope Watermarking Exclusively to Marketing/Public Assets
+- **Scoping Fix**: Scoped watermarking overlay processing specifically to marketing/site assets requesting watermarking (`wm=1` / `watermark=true`).
+- **Clean Deliverables & Previews**: Ensured shared galleries, client deliverables, and admin dashboard panels view cleanly without watermarks while still enforcing HMAC signature verification for original master downloads.
+
 ## VERSION 0.7.19 (2026-08-23) - Secure Watermarking & HMAC Signature Authorization
 - **Eliminated Parameter Bypass**: Removed client-controlled `watermark=false` query parameter bypass. Watermarks are now strictly enforced by the Edge Worker based on tenant database configuration.
 - **HMAC-SHA256 Signed URLs**: Added edge verification (`verifyHmacSignature`) for authorized clean full-resolution asset downloads using signed `sig` and `exp` tokens.

@@ -287,7 +287,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.19' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.20' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -319,7 +319,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.19' }), {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.20' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -483,17 +483,19 @@ export default Sentry.withSentry(
         // Apply Image Resizing/Watermark if enabled (only for images)
         const { features, watermark } = tenantSettings.data
         const widthParam = url.searchParams.get('w')
+        const watermarkParam = url.searchParams.get('wm') === '1' || url.searchParams.get('watermark') === 'true'
 
-        // Watermark is strictly enforced based on tenant configuration unless explicitly clean-authorized
+        // Watermark is applied when explicitly requested for public marketing/site assets, unless clean-authorized
         const isWatermarked =
           !isCleanAuthorized &&
+          watermarkParam &&
           route.type === 'image' &&
           features?.enable_watermark &&
           features?.enable_custom_watermark !== false &&
           watermark?.enabled &&
           watermark?.url
 
-        const isResized = route.type === 'image' && (widthParam || !isCleanAuthorized)
+        const isResized = route.type === 'image' && (widthParam || isWatermarked)
 
         if (isWatermarked || isResized) {
           const w = widthParam ? parseInt(widthParam, 10) || 1920 : 1920
