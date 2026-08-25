@@ -125,6 +125,32 @@ async function verifyHmacSignature(objectKey, expStr, sig, secret) {
 }
 
 /**
+ * Helper: Resolve accurate MIME content type for B2 storage objects.
+ */
+function resolveB2ContentType(cleanObjectKey, b2Response) {
+  const ext = cleanObjectKey.split('.').pop()?.toLowerCase()
+  const mimeMap = {
+    pdf: 'application/pdf',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mov: 'video/quicktime',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    zip: 'application/zip',
+  }
+  if (ext && mimeMap[ext]) {
+    return mimeMap[ext]
+  }
+  const rawType = b2Response?.headers?.get('Content-Type') || b2Response?.headers?.get('content-type')
+  if (rawType && rawType !== 'application/octet-stream') {
+    return rawType
+  }
+  return 'application/octet-stream'
+}
+
+/**
  * Fetch tenant settings directly from Supabase with Edge Caching.
  */
 async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
@@ -663,13 +689,18 @@ export default Sentry.withSentry(
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         }
-        const isPublicB2 = route.prefix === '/reels/' || route.prefix === '/films/';
+        const isPublicB2 = route.prefix === '/reels/' || route.prefix === '/films/'
+        const resolvedType = resolveB2ContentType(cleanObjectKey, b2Response)
+        const filename = cleanObjectKey.split('/').pop() || 'document'
         const headers = { 
           ...CORS_HEADERS, 
-          'Content-Type': b2Response.headers.get('Content-Type') || 'video/mp4' 
-        };
+          'Content-Type': resolvedType,
+        }
+        if (resolvedType === 'application/pdf') {
+          headers['Content-Disposition'] = `inline; filename="${filename}"`
+        }
         if (isPublicB2) {
-          headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+          headers['Cache-Control'] = 'public, max-age=31536000, immutable'
         }
         response = new Response(b2Response.body, {
           status: 200,

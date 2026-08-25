@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.7.21 (2026-08-25) - Backblaze B2 PDF & Deliverable MIME Type Resolution
+- **Accurate MIME Type Handling (`resolveB2ContentType`)**: Added dynamic extension-based MIME type inference for Backblaze B2 objects (`.pdf` -> `application/pdf`, `.zip` -> `application/zip`, `.mp4` -> `video/mp4`, images), eliminating incorrect video fallback on PDF files.
+- **Inline PDF Browser Viewing**: Added `Content-Disposition: inline` for PDF documents, allowing signed contracts and PDF deliverables to render directly in browser tabs without corruption.
+
 ## VERSION 0.7.20 (2026-08-23) - Scope Watermarking Exclusively to Marketing/Public Assets
 - **Scoping Fix**: Scoped watermarking overlay processing specifically to marketing/site assets requesting watermarking (`wm=1` / `watermark=true`).
 - **Clean Deliverables & Previews**: Ensured shared galleries, client deliverables, and admin dashboard panels view cleanly without watermarks while still enforcing HMAC signature verification for original master downloads.
