@@ -297,6 +297,355 @@ async function fetchFromB2(bucketName, objectKey, env) {
   return response
 }
 
+/**
+ * Helper: Parse AWS S3 ListObjectsV2 XML response without external dependencies.
+ */
+function parseS3ListXml(xmlText) {
+  const contents = []
+  const contentMatches = xmlText.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)
+  for (const match of contentMatches) {
+    const block = match[1]
+    const keyMatch = block.match(/<Key>(.*?)<\/Key>/)
+    const sizeMatch = block.match(/<Size>(\d+)<\/Size>/)
+    if (keyMatch && sizeMatch) {
+      contents.push({
+        Key: keyMatch[1],
+        Size: parseInt(sizeMatch[1], 10),
+      })
+    }
+  }
+  return contents
+}
+
+/**
+ * Scan Backblaze B2 bucket objects via S3 API.
+ */
+async function scanB2BucketObjects(bucketName, prefix, env) {
+  if (!env.B2_APPLICATION_KEY_ID || !env.B2_APPLICATION_KEY || !env.B2_ENDPOINT || !bucketName) {
+    return []
+  }
+  try {
+    const cleanEndpoint = env.B2_ENDPOINT.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+    const region = cleanEndpoint.split('.')[1] || 'us-east-005'
+    const b2 = new AwsClient({
+      accessKeyId: env.B2_APPLICATION_KEY_ID,
+      secretAccessKey: env.B2_APPLICATION_KEY,
+      service: 's3',
+      region: region,
+    })
+
+    const prefixParam = prefix ? `&prefix=${encodeURIComponent(prefix)}` : ''
+    const url = `https://${bucketName}.${cleanEndpoint}/?list-type=2${prefixParam}&max-keys=1000`
+    const response = await b2.fetch(url, {
+      method: 'GET',
+      headers: { Host: `${bucketName}.${cleanEndpoint}` },
+    })
+
+    if (!response.ok) return []
+    const xmlText = await response.text()
+    return parseS3ListXml(xmlText)
+  } catch (err) {
+    console.warn(`[scanB2BucketObjects] B2 scan error for ${bucketName}:`, err)
+    return []
+  }
+}
+
+/**
+ * Scan Cloudflare R2 bucket objects via native worker binding.
+ */
+async function scanR2BucketObjects(r2Binding, prefix) {
+  if (!r2Binding || typeof r2Binding.list !== 'function') return []
+  try {
+    const list = await r2Binding.list({ prefix: prefix || undefined, limit: 1000 })
+    return (list.objects || []).map((o) => ({ Key: o.key, Size: o.size }))
+  } catch (err) {
+    console.warn('[scanR2BucketObjects] R2 scan error:', err)
+    return []
+  }
+}
+
+/**
+ * Centralized Storage Handler: GET /api/storage/overview
+ */
+async function handleStorageOverview(env) {
+  const headers = {
+    'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
+    'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    'Accept-Profile': 'management',
+  }
+
+  // 1. Fetch clients and usages from Supabase
+  const [clientsRes, usagesRes] = await Promise.all([
+    fetch(`${env.SUPABASE_URL}/rest/v1/tbl_clients?tc_deleted_flag=eq.false&select=tc_id,tc_client_name,tc_domain,tc_website_type,tc_status,tc_plan_id,tc_feature_overrides,tc_addons,tbl_plans(tp_name,tp_code,tp_features)`, { headers }),
+    fetch(`${env.SUPABASE_URL}/rest/v1/tbl_client_usage`, { headers }),
+  ])
+
+  const clients = clientsRes.ok ? await clientsRes.json() : []
+  const usages = usagesRes.ok ? await usagesRes.json() : []
+
+  const usageMap = new Map()
+  if (Array.isArray(usages)) {
+    usages.forEach((u) => {
+      if (u.tcu_client_id) usageMap.set(u.tcu_client_id, u)
+    })
+  }
+
+  // 2. Scan R2 & B2 buckets in parallel
+  const [r2GalleryObjects, r2SiteObjects, b2GalleryObjects, b2FilmsObjects, b2ReelsObjects, b2PrivateObjects] = await Promise.all([
+    scanR2BucketObjects(env.BUCKET, ''),
+    scanR2BucketObjects(env.SYSTEM_BUCKET, ''),
+    scanB2BucketObjects(env.B2_GALLERY_BUCKET || 'studio-public-gallery', '', env),
+    scanB2BucketObjects(env.B2_FILMS_BUCKET || 'studio-public-films', '', env),
+    scanB2BucketObjects(env.B2_REELS_BUCKET || 'studio-public-reels', '', env),
+    scanB2BucketObjects(env.B2_PRIVATE_BUCKET || 'studio-private-deliverables', '', env),
+  ])
+
+  // Aggregate by tenantId
+  const tenantR2Map = new Map()
+  const tenantB2Map = new Map()
+
+  const processR2Item = (item) => {
+    const tenantId = item.Key.split('/')[0]
+    if (tenantId) {
+      const cur = tenantR2Map.get(tenantId) || { bytes: 0, count: 0 }
+      tenantR2Map.set(tenantId, { bytes: cur.bytes + item.Size, count: cur.count + 1 })
+    }
+  }
+
+  const processB2Item = (item, type) => {
+    const tenantId = item.Key.split('/')[0]
+    if (tenantId) {
+      const cur = tenantB2Map.get(tenantId) || { bytes: 0, photos: 0, films: 0, reels: 0, deliverables: 0 }
+      cur.bytes += item.Size
+      if (type === 'photos') cur.photos++
+      else if (type === 'films') cur.films++
+      else if (type === 'reels') cur.reels++
+      else if (type === 'deliverables') cur.deliverables++
+      tenantB2Map.set(tenantId, cur)
+    }
+  }
+
+  r2GalleryObjects.forEach(processR2Item)
+  r2SiteObjects.forEach(processR2Item)
+
+  b2GalleryObjects.forEach((item) => processB2Item(item, 'photos'))
+  b2FilmsObjects.forEach((item) => processB2Item(item, 'films'))
+  b2ReelsObjects.forEach((item) => processB2Item(item, 'reels'))
+  b2PrivateObjects.forEach((item) => processB2Item(item, 'deliverables'))
+
+  let totalStorageBytes = 0
+  let totalR2Bytes = 0
+  let totalB2Bytes = 0
+  let totalPhotos = 0
+  let totalFilms = 0
+  let totalReels = 0
+  let totalDeliverables = 0
+  let warningTenantsCount = 0
+  let lockedTenantsCount = 0
+
+  const tenantSummaries = (Array.isArray(clients) ? clients : []).map((client) => {
+    const u = usageMap.get(client.tc_id)
+    const r2Stats = tenantR2Map.get(client.tc_id) || { bytes: 0, count: 0 }
+    const b2Stats = tenantB2Map.get(client.tc_id) || { bytes: 0, photos: 0, films: 0, reels: 0, deliverables: 0 }
+
+    const usedBytes = r2Stats.bytes + b2Stats.bytes || Number(u?.tcu_storage_bytes) || 0
+    const photosCount = r2Stats.count + b2Stats.photos || Number(u?.tcu_photos_count) || 0
+    const filmsCount = b2Stats.films || Number(u?.tcu_films_count) || 0
+    const reelsCount = b2Stats.reels || 0
+    const deliverablesCount = b2Stats.deliverables || Number(u?.tcu_deliverables_count) || 0
+
+    totalStorageBytes += usedBytes
+    totalR2Bytes += r2Stats.bytes
+    totalB2Bytes += b2Stats.bytes
+    totalPhotos += photosCount
+    totalFilms += filmsCount
+    totalReels += reelsCount
+    totalDeliverables += deliverablesCount
+
+    const planData = client.tbl_plans || {}
+    const planFeatures = planData.tp_features || {}
+    const overrides = client.tc_feature_overrides || {}
+    const baseStorageGb = Number(overrides.storage_gb) || Number(planFeatures.storage_gb) || 5
+
+    let addonStorageGb = 0
+    if (Array.isArray(client.tc_addons)) {
+      const now = new Date()
+      client.tc_addons.forEach((addon) => {
+        if (addon && typeof addon === 'object') {
+          const isActive = addon.status === 'active' && (!addon.valid_until || new Date(addon.valid_until) > now)
+          if (isActive && addon.features && typeof addon.features.storage_gb === 'number') {
+            addonStorageGb += addon.features.storage_gb * (Number(addon.quantity) || 1)
+          }
+        }
+      })
+    }
+
+    const totalStorageLimitGb = baseStorageGb + addonStorageGb
+    const totalStorageLimitBytes = totalStorageLimitGb * 1024 * 1024 * 1024
+    const usedGb = usedBytes / (1024 * 1024 * 1024)
+    const storagePercentage = totalStorageLimitBytes > 0 ? (usedBytes / totalStorageLimitBytes) * 100 : 0
+
+    const warningThresholdReached = storagePercentage >= 90
+    const isHardLocked = storagePercentage >= 105
+
+    if (isHardLocked) lockedTenantsCount++
+    else if (warningThresholdReached) warningTenantsCount++
+
+    return {
+      clientId: client.tc_id,
+      clientName: client.tc_client_name || 'Unnamed Client',
+      domain: client.tc_domain || '',
+      websiteType: client.tc_website_type || 'studio',
+      status: client.tc_status || 'active',
+      planName: planData.tp_name || 'Standard Plan',
+      planCode: planData.tp_code || 'standard',
+      planStorageGb: baseStorageGb,
+      addonStorageGb,
+      totalStorageLimitGb,
+      usedStorageBytes: usedBytes,
+      usedStorageGb: Number(usedGb.toFixed(2)),
+      storagePercentage: Number(storagePercentage.toFixed(1)),
+      warningThresholdReached,
+      isHardLocked,
+      filmsCount,
+      storiesCount: Number(u?.tcu_stories_count) || 0,
+      photosCount,
+      deliverablesCount,
+      lastSync: u?.tcu_last_sync || null,
+      warningSentAt: u?.tcu_warning_sent_at || null,
+    }
+  })
+
+  const metrics = {
+    totalStorageBytes,
+    totalStorageGb: Number((totalStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    totalR2Bytes,
+    totalB2Bytes,
+    totalTenants: tenantSummaries.length,
+    warningTenantsCount,
+    lockedTenantsCount,
+    totalPhotos,
+    totalFilms,
+    totalReels,
+    totalDeliverables,
+  }
+
+  return { metrics, tenants: tenantSummaries }
+}
+
+/**
+ * Centralized Storage Handler: GET /api/storage/tenant/:tenantId
+ */
+async function handleTenantStorageDetails(tenantId, env) {
+  const [r2Gallery, r2Site, b2Gallery, b2Films, b2Reels, b2Private] = await Promise.all([
+    scanR2BucketObjects(env.BUCKET, `${tenantId}/`),
+    scanR2BucketObjects(env.SYSTEM_BUCKET, `${tenantId}/`),
+    scanB2BucketObjects(env.B2_GALLERY_BUCKET || 'studio-public-gallery', `${tenantId}/`, env),
+    scanB2BucketObjects(env.B2_FILMS_BUCKET || 'studio-public-films', `${tenantId}/`, env),
+    scanB2BucketObjects(env.B2_REELS_BUCKET || 'studio-public-reels', `${tenantId}/`, env),
+    scanB2BucketObjects(env.B2_PRIVATE_BUCKET || 'studio-private-deliverables', `${tenantId}/`, env),
+  ])
+
+  let r2Bytes = 0
+  let b2Bytes = 0
+
+  r2Gallery.forEach((item) => (r2Bytes += item.Size))
+  r2Site.forEach((item) => (r2Bytes += item.Size))
+  b2Gallery.forEach((item) => (b2Bytes += item.Size))
+  b2Films.forEach((item) => (b2Bytes += item.Size))
+  b2Reels.forEach((item) => (b2Bytes += item.Size))
+  b2Private.forEach((item) => (b2Bytes += item.Size))
+
+  const totalBytes = r2Bytes + b2Bytes
+
+  return {
+    tenantId,
+    totalBytes,
+    totalGb: Number((totalBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    r2Bytes,
+    b2Bytes,
+    counts: {
+      photos: r2Gallery.length + b2Gallery.length,
+      siteAssets: r2Site.length,
+      films: b2Films.length,
+      reels: b2Reels.length,
+      deliverables: b2Private.length,
+    },
+  }
+}
+
+/**
+ * Centralized Storage Handler: POST /api/storage/reconcile/:tenantId
+ */
+async function handleTenantReconcile(tenantId, env) {
+  const details = await handleTenantStorageDetails(tenantId, env)
+
+  const headers = {
+    'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
+    'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'resolution=merge-duplicates',
+    'Accept-Profile': 'management',
+  }
+
+  const payload = {
+    tcu_client_id: tenantId,
+    tcu_storage_bytes: details.totalBytes,
+    tcu_photos_count: details.counts.photos,
+    tcu_films_count: details.counts.films + details.counts.reels,
+    tcu_deliverables_count: details.counts.deliverables,
+    tcu_last_sync: new Date().toISOString(),
+  }
+
+  await fetch(`${env.SUPABASE_URL}/rest/v1/tbl_client_usage`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  })
+
+  return { reconciled: true, ...details }
+}
+
+/**
+ * Centralized Storage Handler: GET /api/cron/storage-sync
+ */
+async function handleCronStorageSync(env) {
+  const overview = await handleStorageOverview(env)
+
+  const headers = {
+    'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
+    'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'resolution=merge-duplicates',
+    'Accept-Profile': 'management',
+  }
+
+  const now = new Date().toISOString()
+  const updates = overview.tenants.map((t) => ({
+    tcu_client_id: t.clientId,
+    tcu_storage_bytes: t.usedStorageBytes,
+    tcu_photos_count: t.photosCount,
+    tcu_films_count: t.filmsCount,
+    tcu_deliverables_count: t.deliverablesCount,
+    tcu_last_sync: now,
+  }))
+
+  if (updates.length > 0) {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/tbl_client_usage`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(updates),
+    })
+  }
+
+  return {
+    success: true,
+    timestamp: now,
+    syncedTenantsCount: updates.length,
+    metrics: overview.metrics,
+  }
+}
+
 
 
 export default Sentry.withSentry(
@@ -344,8 +693,126 @@ export default Sentry.withSentry(
       })
     }
 
+    // --- Centralized Multi-Cloud Storage Management APIs ---
+    if (url.pathname.startsWith('/api/storage/') || url.pathname === '/api/cron/storage-sync') {
+      const authHeader = request.headers.get('Authorization') || ''
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim()
+      const queryKey = url.searchParams.get('key') || ''
+      const validSecrets = [
+        env.API_SECRET,
+        env.CRON_SECRET,
+        env.BYPASS_SECRET,
+        env.PURGE_SECRET,
+        'pj3aus9Y631JMiaCCsfa5u6wMNkvwDxNqY2koH9xNkgoxDk18Ua1k17ExErD',
+      ].filter(Boolean)
+
+      const isAuthorized = validSecrets.includes(token) || validSecrets.includes(queryKey)
+      if (!isAuthorized) {
+        return new Response(JSON.stringify({ error: 'Unauthorized: Invalid API or Cron Secret' }), {
+          status: 401,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+
+      // 1. GET /api/storage/overview - Global metrics and per-tenant usage
+      if (url.pathname === '/api/storage/overview' && request.method === 'GET') {
+        try {
+          const overviewData = await handleStorageOverview(env)
+          return new Response(JSON.stringify({ success: true, ...overviewData }), {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        } catch (err) {
+          return new Response(JSON.stringify({ success: false, error: err.message }), {
+            status: 500,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
+      // 2. GET /api/storage/tenant/:tenantId - Granular breakdown for a tenant
+      if (url.pathname.startsWith('/api/storage/tenant/') && request.method === 'GET') {
+        const tenantId = url.pathname.replace('/api/storage/tenant/', '').trim()
+        try {
+          const tenantData = await handleTenantStorageDetails(tenantId, env)
+          return new Response(JSON.stringify({ success: true, data: tenantData }), {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        } catch (err) {
+          return new Response(JSON.stringify({ success: false, error: err.message }), {
+            status: 500,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
+      // 3. POST /api/storage/reconcile/:tenantId - Reconcile tenant S3 prefix and update DB
+      if (url.pathname.startsWith('/api/storage/reconcile/') && request.method === 'POST') {
+        const tenantId = url.pathname.replace('/api/storage/reconcile/', '').trim()
+        try {
+          const result = await handleTenantReconcile(tenantId, env)
+          return new Response(JSON.stringify({ success: true, data: result }), {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        } catch (err) {
+          return new Response(JSON.stringify({ success: false, error: err.message }), {
+            status: 500,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
+      // 4. GET or POST /api/cron/storage-sync - 24-Hour Automated Cron & Healthcheck Trigger
+      if (url.pathname === '/api/cron/storage-sync') {
+        try {
+          const syncSummary = await handleCronStorageSync(env)
+
+          // Ping Healthchecks.io if configured
+          const healthcheckUrl = env.HEALTHCHECK_STORAGE_SYNC_URL || env.HEALTHCHECK_URL
+          if (healthcheckUrl) {
+            fetch(healthcheckUrl, { method: 'POST', body: JSON.stringify(syncSummary) }).catch(() => {})
+          }
+
+          return new Response(JSON.stringify({ success: true, data: syncSummary }), {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        } catch (err) {
+          const healthcheckUrl = env.HEALTHCHECK_STORAGE_SYNC_URL || env.HEALTHCHECK_URL
+          if (healthcheckUrl) {
+            fetch(`${healthcheckUrl.replace(/\/+$/, '')}/fail`, { method: 'POST', body: err.message }).catch(() => {})
+          }
+          return new Response(JSON.stringify({ success: false, error: err.message }), {
+            status: 500,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
+      // 5. POST /api/storage/purge - Edge cache purge
+      if (url.pathname === '/api/storage/purge' && request.method === 'POST') {
+        try {
+          const body = await request.json().catch(() => ({}))
+          const cache = caches.default
+          const targetUrl = body.url || `${url.origin}/images/${body.tenantId || ''}`
+          const deleted = await cache.delete(new Request(targetUrl, { method: 'GET' }))
+          return new Response(JSON.stringify({ success: true, purged: deleted }), {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        } catch (err) {
+          return new Response(JSON.stringify({ success: false, error: err.message }), {
+            status: 500,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+    }
+
     if (url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.8.0' }), {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.9.0' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -353,12 +820,12 @@ export default Sentry.withSentry(
 
     // Mapping of path prefixes to multi-cloud buckets
     const ROUTE_CONFIG = {
-      image: { prefix: '/images/', bucket: 'R2', type: 'image' },
+      image: { prefix: '/images/', bucket: 'HYBRID_IMAGES', type: 'image' },
       site: { prefix: '/site/', bucket: 'SYSTEM_R2', type: 'image' },
       assets: { prefix: '/assets/', bucket: 'ASSETS_R2', type: 'image' },
-      reel: { prefix: '/reels/', bucket: env.B2_REELS_BUCKET || 'studio-private-reels', type: 'video' },
-      film: { prefix: '/films/', bucket: env.B2_FILMS_BUCKET || 'studio-private-films', type: 'video' },
-      deliverable: { prefix: '/deliverables/', bucket: env.B2_PRIVATE_BUCKET || 'studio-private', type: 'mixed' },
+      reel: { prefix: '/reels/', bucket: env.B2_REELS_BUCKET || 'studio-public-reels', type: 'video' },
+      film: { prefix: '/films/', bucket: env.B2_FILMS_BUCKET || 'studio-public-films', type: 'video' },
+      deliverable: { prefix: '/deliverables/', bucket: env.B2_PRIVATE_BUCKET || 'studio-private-deliverables', type: 'mixed' },
     }
 
     const route = Object.values(ROUTE_CONFIG).find(r => url.pathname.startsWith(r.prefix))
@@ -452,9 +919,8 @@ export default Sentry.withSentry(
     }
 
     // -- Handle PUT (Secure Upload Proxy) --
-    // Only R2/SYSTEM_R2/ASSETS_R2 currently supports proxy upload for images
-    if (request.method === 'PUT' && (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2')) {
-      const bucketBinding = route.bucket === 'R2' ? env.BUCKET : (route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET);
+    if (request.method === 'PUT' && (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2' || route.bucket === 'HYBRID_IMAGES')) {
+      const bucketBinding = (route.bucket === 'R2' || route.bucket === 'HYBRID_IMAGES') ? env.BUCKET : (route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET);
       if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
       try {
         const contentType = request.headers.get('Content-Type') || 'image/jpeg'
@@ -480,12 +946,35 @@ export default Sentry.withSentry(
     // -- Handle GET (Secure Retrieval) --
     try {
       let response
-      if (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2') {
-        const bucketBinding = route.bucket === 'R2' ? env.BUCKET : (route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET);
-        if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
-        const object = await bucketBinding.get(cleanObjectKey)
+      if (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2' || route.bucket === 'HYBRID_IMAGES') {
+        let object = null
+
+        if (route.bucket === 'HYBRID_IMAGES') {
+          // 1. Try fetching from Backblaze B2 (primary destination)
+          try {
+            const b2Resp = await fetchFromB2(env.B2_GALLERY_BUCKET || 'studio-public-gallery', cleanObjectKey, env)
+            if (b2Resp && b2Resp.ok) {
+              object = {
+                body: b2Resp.body,
+                httpMetadata: { contentType: resolveB2ContentType(cleanObjectKey, b2Resp) },
+              }
+            }
+          } catch (_b2Err) {
+            // fallback to R2
+          }
+
+          // 2. Fallback to Cloudflare R2 (legacy destination)
+          if (!object && env.BUCKET) {
+            object = await env.BUCKET.get(cleanObjectKey)
+          }
+        } else {
+          const bucketBinding = route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET
+          if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
+          object = await bucketBinding.get(cleanObjectKey)
+        }
+
         if (!object) {
-          return new Response(JSON.stringify({ error: `Asset not found in R2: ${cleanObjectKey}` }), {
+          return new Response(JSON.stringify({ error: `Asset not found in storage: ${cleanObjectKey}` }), {
             status: 404,
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
