@@ -30,6 +30,10 @@ bucket_name = "studio-public-gallery"
 binding = "SYSTEM_BUCKET"
 bucket_name = "studio-site-assets"
 
+[[r2_buckets]]
+binding = "ASSETS_BUCKET"
+bucket_name = "zorvik-assets"
+
 # Secrets are NOT stored here.
 # Set them via CLI before deploying:
 #   wrangler secret put SUPABASE_SERVICE_ROLE_KEY

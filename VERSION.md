@@ -1,5 +1,10 @@
 # image-proxy — Version History
 
+## VERSION 0.8.0 (2026-08-29) - Migrate Platform Assets to Cloudflare R2 & Decommission Supabase Storage
+- **Dedicated R2 Assets Binding (`ASSETS_BUCKET`)**: Mapped the `/assets/` route prefix directly to the dedicated `zorvik-assets` Cloudflare R2 bucket.
+- **Decommissioned Supabase Storage**: Removed all authenticated Supabase Storage HTTP fetches and dependencies from the Edge Gateway.
+- **Edge Caching & Performance**: Enabled full Cloudflare Edge Worker caching and ImageKit/Cloudinary optimization on R2 platform assets.
+
 ## VERSION 0.7.21 (2026-08-25) - Backblaze B2 PDF & Deliverable MIME Type Resolution
 - **Accurate MIME Type Handling (`resolveB2ContentType`)**: Added dynamic extension-based MIME type inference for Backblaze B2 objects (`.pdf` -> `application/pdf`, `.zip` -> `application/zip`, `.mp4` -> `video/mp4`, images), eliminating incorrect video fallback on PDF files.
 - **Inline PDF Browser Viewing**: Added `Content-Disposition: inline` for PDF documents, allowing signed contracts and PDF deliverables to render directly in browser tabs without corruption.

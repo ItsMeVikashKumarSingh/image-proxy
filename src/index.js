@@ -313,7 +313,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.7.20' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.8.0' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -345,7 +345,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.7.20' }), {
+      return new Response(JSON.stringify({ status: 'running', service: 'wedding-image-proxy', message: 'Wedding Image Proxy — Active and Running', version: '0.8.0' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -355,7 +355,7 @@ export default Sentry.withSentry(
     const ROUTE_CONFIG = {
       image: { prefix: '/images/', bucket: 'R2', type: 'image' },
       site: { prefix: '/site/', bucket: 'SYSTEM_R2', type: 'image' },
-      assets: { prefix: '/assets/', bucket: 'SUPABASE_STORAGE', type: 'image' },
+      assets: { prefix: '/assets/', bucket: 'ASSETS_R2', type: 'image' },
       reel: { prefix: '/reels/', bucket: env.B2_REELS_BUCKET || 'studio-private-reels', type: 'video' },
       film: { prefix: '/films/', bucket: env.B2_FILMS_BUCKET || 'studio-private-films', type: 'video' },
       deliverable: { prefix: '/deliverables/', bucket: env.B2_PRIVATE_BUCKET || 'studio-private', type: 'mixed' },
@@ -371,7 +371,7 @@ export default Sentry.withSentry(
 
     // -- Extract Tenant Identity and Object Key from Path --
     const objectKey = url.pathname.replace(route.prefix, '')
-    const isPlatformAsset = route.bucket === 'SUPABASE_STORAGE'
+    const isPlatformAsset = route.bucket === 'ASSETS_R2'
 
     let cleanObjectKey = objectKey
     let isBypassed = false
@@ -452,9 +452,9 @@ export default Sentry.withSentry(
     }
 
     // -- Handle PUT (Secure Upload Proxy) --
-    // Only R2/SYSTEM_R2 currently supports proxy upload for images
-    if (request.method === 'PUT' && (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2')) {
-      const bucketBinding = route.bucket === 'R2' ? env.BUCKET : env.SYSTEM_BUCKET;
+    // Only R2/SYSTEM_R2/ASSETS_R2 currently supports proxy upload for images
+    if (request.method === 'PUT' && (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2')) {
+      const bucketBinding = route.bucket === 'R2' ? env.BUCKET : (route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET);
       if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
       try {
         const contentType = request.headers.get('Content-Type') || 'image/jpeg'
@@ -480,8 +480,8 @@ export default Sentry.withSentry(
     // -- Handle GET (Secure Retrieval) --
     try {
       let response
-      if (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2') {
-        const bucketBinding = route.bucket === 'R2' ? env.BUCKET : env.SYSTEM_BUCKET;
+      if (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2') {
+        const bucketBinding = route.bucket === 'R2' ? env.BUCKET : (route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET);
         if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
         const object = await bucketBinding.get(cleanObjectKey)
         if (!object) {
@@ -618,66 +618,6 @@ export default Sentry.withSentry(
           response = new Response(object.body, {
             status: 200,
             headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
-          })
-        }
-      } else if (route.bucket === 'SUPABASE_STORAGE') {
-        const supabaseStorageUrl = `${env.SUPABASE_URL}/storage/v1/object/authenticated/zorvik-assets/${cleanObjectKey}`
-        const supabaseHeaders = {
-          'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
-          'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-        }
-        const supabaseResponse = await fetch(supabaseStorageUrl, { headers: supabaseHeaders })
-        if (!supabaseResponse.ok) {
-          return new Response(JSON.stringify({ error: `Asset not found in Supabase Storage: ${cleanObjectKey}` }), {
-            status: supabaseResponse.status,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-
-        const widthParam = url.searchParams.get('w')
-        const isResized = route.type === 'image' && widthParam
-
-        if (isResized) {
-          const w = parseInt(widthParam, 10) || 1920
-          const cleanImageUrl = `https://${url.hostname}${route.prefix}${cleanObjectKey}?bypass=${env.BYPASS_SECRET}`
-          const parts = cleanObjectKey.split('/')
-          const filename = parts.pop()
-          const dirPath = parts.join('/')
-          const imageKitPath = `${route.prefix.slice(1)}${dirPath}/bypass/${env.BYPASS_SECRET || ''}/${filename}`
-          
-          let cdnResponse = null
-          try {
-            const imageKitUrl = `https://ik.imagekit.io/${env.IMAGEKIT_ID}/tr:w-${w},f-auto/${imageKitPath}`
-            cdnResponse = await fetch(imageKitUrl)
-            if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
-          } catch (err) {
-            console.error('ImageKit failed, falling back to Cloudinary:', err)
-            try {
-              const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_${w},c_limit,f_auto,q_auto/${encodeURIComponent(cleanImageUrl)}`
-              cdnResponse = await fetch(cloudinaryUrl)
-            } catch (clErr) {
-              console.error('Cloudinary fallback failed:', clErr)
-            }
-          }
-
-          if (cdnResponse && cdnResponse.ok) {
-            response = new Response(cdnResponse.body, {
-              status: 200,
-              headers: {
-                ...CORS_HEADERS,
-                'Content-Type': cdnResponse.headers.get('Content-Type') || supabaseResponse.headers.get('Content-Type') || 'image/jpeg',
-              },
-            })
-          } else {
-            response = new Response(supabaseResponse.body, {
-              status: 200,
-              headers: { ...CORS_HEADERS, 'Content-Type': supabaseResponse.headers.get('Content-Type') || 'image/jpeg' },
-            })
-          }
-        } else {
-          response = new Response(supabaseResponse.body, {
-            status: 200,
-            headers: { ...CORS_HEADERS, 'Content-Type': supabaseResponse.headers.get('Content-Type') || 'image/jpeg' },
           })
         }
       } else {
