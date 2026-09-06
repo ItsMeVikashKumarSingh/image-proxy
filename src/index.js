@@ -176,7 +176,12 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
   }
 
   const clientUrl = `${env.SUPABASE_URL}/rest/v1/tbl_clients?tc_id=eq.${tenantId}&tc_deleted_flag=eq.false`
-  const clientResp = await fetch(clientUrl, { headers })
+  const projectsUrl = `${env.SUPABASE_URL}/rest/v1/tbl_client_projects?tcp_client_id=eq.${tenantId}&tcp_deleted_flag=eq.false&order=tcp_is_primary.desc,tcp_created_at.asc`
+
+  const [clientResp, projectsResp] = await Promise.all([
+    fetch(clientUrl, { headers }),
+    fetch(projectsUrl, { headers }),
+  ])
 
   if (!clientResp.ok) {
     const status = Number(clientResp.status)
@@ -191,8 +196,20 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
     throw new Error('TENANT_NOT_FOUND')
   }
 
-  const licensedDomains = (client.tc_domain || '')
-    .split(',')
+  const projects = projectsResp.ok ? await projectsResp.json() : []
+  const primaryProject = Array.isArray(projects) && projects.length > 0 ? projects[0] : null
+
+  // Collect all licensed domains across all active client projects
+  const allDomains = []
+  if (Array.isArray(projects)) {
+    projects.forEach((p) => {
+      if (Array.isArray(p.tcp_allowed_domains)) {
+        p.tcp_allowed_domains.forEach((d) => allDomains.push(d))
+      }
+    })
+  }
+
+  const licensedDomains = allDomains
     .map(d => getHostname(d.trim()))
     .filter(Boolean)
 
@@ -205,8 +222,9 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
   }
 
   let planFeatures = {}
-  if (client.tc_plan_id) {
-    const planUrl = `${env.SUPABASE_URL}/rest/v1/tbl_plans?tp_id=eq.${client.tc_plan_id}`
+  const targetPlanId = primaryProject?.tcp_plan_id || client.tc_plan_id
+  if (targetPlanId) {
+    const planUrl = `${env.SUPABASE_URL}/rest/v1/tbl_plans?tp_id=eq.${targetPlanId}`
     const planResp = await fetch(planUrl, { headers })
     if (planResp.ok) {
       const plan = await planResp.json()
@@ -214,7 +232,9 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
     }
   }
 
-  const mergedFeatures = mergeDeep(planFeatures, client.tc_feature_overrides || {})
+  const projectOverrides = primaryProject?.tcp_feature_overrides || {}
+  const clientOverrides = client.tc_feature_overrides || {}
+  const mergedFeatures = mergeDeep(planFeatures, { ...clientOverrides, ...projectOverrides })
 
   // Fetch site settings from studio schema
   const studioHeaders = {
@@ -238,12 +258,14 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
     }
   }
 
+  const isMaintenance = Boolean(primaryProject?.tcp_is_maintenance || client.tc_is_maintenance)
+
   const result = {
     valid: true,
     data: {
       client_id: client.tc_id,
       features: mergedFeatures,
-      is_maintenance: client.tc_is_maintenance || false,
+      is_maintenance: isMaintenance,
       licensedDomains: licensedDomains,
       hostname: hostname,
       watermark: {
@@ -374,14 +396,25 @@ async function handleStorageOverview(env) {
     'Accept-Profile': 'management',
   }
 
-  // 1. Fetch clients and usages from Supabase
-  const [clientsRes, usagesRes] = await Promise.all([
-    fetch(`${env.SUPABASE_URL}/rest/v1/tbl_clients?tc_deleted_flag=eq.false&select=tc_id,tc_client_name,tc_domain,tc_website_type,tc_status,tc_plan_id,tc_feature_overrides,tc_addons,tbl_plans(tp_name,tp_code,tp_features)`, { headers }),
+  // 1. Fetch clients, projects, and usages from Supabase
+  const [clientsRes, projectsRes, usagesRes] = await Promise.all([
+    fetch(`${env.SUPABASE_URL}/rest/v1/tbl_clients?tc_deleted_flag=eq.false&select=tc_id,tc_client_name,tc_status`, { headers }),
+    fetch(`${env.SUPABASE_URL}/rest/v1/tbl_client_projects?tcp_deleted_flag=eq.false&select=tcp_id,tcp_client_id,tcp_name,tcp_allowed_domains,tcp_website_type,tcp_plan_id,tcp_feature_overrides,tcp_addons,tcp_is_primary,tbl_plans(tp_name,tp_code,tp_features)&order=tcp_is_primary.desc,tcp_created_at.asc`, { headers }),
     fetch(`${env.SUPABASE_URL}/rest/v1/tbl_client_usage`, { headers }),
   ])
 
   const clients = clientsRes.ok ? await clientsRes.json() : []
+  const projects = projectsRes.ok ? await projectsRes.json() : []
   const usages = usagesRes.ok ? await usagesRes.json() : []
+
+  const projectMap = new Map()
+  if (Array.isArray(projects)) {
+    projects.forEach((p) => {
+      if (!projectMap.has(p.tcp_client_id) || p.tcp_is_primary) {
+        projectMap.set(p.tcp_client_id, p)
+      }
+    })
+  }
 
   const usageMap = new Map()
   if (Array.isArray(usages)) {
@@ -462,15 +495,17 @@ async function handleStorageOverview(env) {
     totalReels += reelsCount
     totalDeliverables += deliverablesCount
 
-    const planData = client.tbl_plans || {}
+    const primaryProject = projectMap.get(client.tc_id)
+    const planData = primaryProject?.tbl_plans || {}
     const planFeatures = planData.tp_features || {}
-    const overrides = client.tc_feature_overrides || {}
+    const overrides = primaryProject?.tcp_feature_overrides || {}
     const baseStorageGb = Number(overrides.storage_gb) || Number(planFeatures.storage_gb) || 5
 
     let addonStorageGb = 0
-    if (Array.isArray(client.tc_addons)) {
+    const projectAddons = primaryProject?.tcp_addons || []
+    if (Array.isArray(projectAddons)) {
       const now = new Date()
-      client.tc_addons.forEach((addon) => {
+      projectAddons.forEach((addon) => {
         if (addon && typeof addon === 'object') {
           const isActive = addon.status === 'active' && (!addon.valid_until || new Date(addon.valid_until) > now)
           if (isActive && addon.features && typeof addon.features.storage_gb === 'number') {
@@ -491,11 +526,15 @@ async function handleStorageOverview(env) {
     if (isHardLocked) lockedTenantsCount++
     else if (warningThresholdReached) warningTenantsCount++
 
+    const domainStr = Array.isArray(primaryProject?.tcp_allowed_domains)
+      ? primaryProject.tcp_allowed_domains.join(', ')
+      : ''
+
     return {
       clientId: client.tc_id,
-      clientName: client.tc_client_name || 'Unnamed Client',
-      domain: client.tc_domain || '',
-      websiteType: client.tc_website_type || 'studio',
+      clientName: client.tc_client_name || primaryProject?.tcp_name || 'Unnamed Client',
+      domain: domainStr,
+      websiteType: primaryProject?.tcp_website_type || 'studio',
       status: client.tc_status || 'active',
       planName: planData.tp_name || 'Standard Plan',
       planCode: planData.tp_code || 'standard',
@@ -816,6 +855,59 @@ export default Sentry.withSentry(
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
+    }
+
+    // ----------------------------------------------------
+    // Dedicated Route: GET /internal/* (Direct B2 zorvik-internal delivery)
+    // ----------------------------------------------------
+    if (url.pathname.startsWith('/internal/')) {
+      const objectKey = url.pathname.replace('/internal/', '').replace(/^\/+/, '')
+      if (!objectKey) {
+        return new Response(JSON.stringify({ error: 'Missing object key' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+
+      try {
+        const bucketName = env.B2_INTERNAL_BUCKET || 'zorvik-internal'
+        const b2Resp = await fetchFromB2(bucketName, objectKey, env)
+
+        if (!b2Resp || !b2Resp.ok) {
+          return new Response(JSON.stringify({ error: `Internal document not found: ${objectKey}` }), {
+            status: 404,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+
+        const contentType = resolveB2ContentType(objectKey, b2Resp)
+        const responseHeaders = new Headers({
+          ...CORS_HEADERS,
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+          'Content-Disposition': 'inline',
+        })
+
+        const contentLength = b2Resp.headers?.get('Content-Length') || b2Resp.headers?.get('content-length')
+        if (contentLength) {
+          responseHeaders.set('Content-Length', contentLength)
+        }
+
+        const etag = b2Resp.headers?.get('ETag') || b2Resp.headers?.get('etag')
+        if (etag) {
+          responseHeaders.set('ETag', etag)
+        }
+
+        return new Response(b2Resp.body, {
+          status: 200,
+          headers: responseHeaders,
+        })
+      } catch (err) {
+        return new Response(JSON.stringify({ error: 'Failed to fetch internal document', details: err.message }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
     }
 
     // Mapping of path prefixes to multi-cloud buckets

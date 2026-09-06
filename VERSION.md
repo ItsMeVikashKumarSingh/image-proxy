@@ -1,5 +1,15 @@
 # image-proxy — Version History
 
+## VERSION 0.8.2 (2026-09-06) - Multi-Project Architecture Alignment & Legacy Column Elimination
+- **Native Multi-Project Lookup**: Updated `getTenantSettings` to query `management.tbl_client_projects` alongside `tbl_clients`, dynamically collecting licensed domains across all active client projects (`tcp_allowed_domains`) and applying primary project plan features and overrides.
+- **Eliminated Deprecated `tc_domain` Queries**: Permanently replaced direct queries on `management.tbl_clients.tc_domain` in domain authorization checks and `/api/storage/overview` reporting with `tbl_client_projects`.
+- **Primary Project Storage Quota Aggregation**: Updated `handleStorageOverview` to map tenant domain, website type, plan tiers, and storage add-ons directly from the client's primary project.
+
+## VERSION 0.8.1 (2026-09-01) - Dedicated zorvik-internal Document CDN Delivery Endpoint
+- **Dedicated Route (`GET /internal/*`)**: Added pure document streaming directly from the Backblaze B2 `zorvik-internal` bucket via AWS SigV4.
+- **Zero Image Manipulation Overhead**: Internal invoices, agreements, and receipts are delivered verbatim with `Content-Type: application/pdf`, `Content-Disposition: inline`, and Cloudflare Edge caching (`Cache-Control: public, max-age=86400, s-maxage=604800`).
+- **Domain Privacy & $0 Egress**: Eliminates direct exposure of Backblaze S3 bucket URLs and serves documents under the official Zorvik CDN domain.
+
 ## VERSION 0.8.0 (2026-08-29) - Migrate Platform Assets to Cloudflare R2 & Decommission Supabase Storage
 - **Dedicated R2 Assets Binding (`ASSETS_BUCKET`)**: Mapped the `/assets/` route prefix directly to the dedicated `zorvik-assets` Cloudflare R2 bucket.
 - **Decommissioned Supabase Storage**: Removed all authenticated Supabase Storage HTTP fetches and dependencies from the Edge Gateway.
