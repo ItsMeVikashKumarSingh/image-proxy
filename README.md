@@ -2,7 +2,7 @@
 
 [![CI — wedding-image-proxy](https://github.com/YOUR_ORG/wedding-image-proxy/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/YOUR_ORG/wedding-image-proxy/actions/workflows/ci.yml)
 
-> **Cloudflare Worker** — Real-time image watermarking and secure asset delivery for the DreamlandStudiOz multi-tenant platform.
+> **Cloudflare Worker** — Real-time image watermarking and secure asset delivery for the Studio Suite multi-tenant platform.
 
 Receives image requests from the WEDDING frontend, validates the requesting studio's license via the **Zorvik License API**, fetches the original asset from **Cloudflare R2 / Backblaze B2**, and applies **dynamic watermarks** on-the-fly via Cloudflare Image Resizing — all at the edge, with zero origin server involvement.
 
