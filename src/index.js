@@ -717,15 +717,47 @@ export default Sentry.withSentry(
       }
       
       const cache = caches.default
-      const cacheKeyDefault = new Request(request.url, { method: 'GET' })
-      const cacheKeyNoWatermark = new Request(request.url + '?watermark=false', { method: 'GET' })
-      
-      const deletedDefault = await cache.delete(cacheKeyDefault)
-      const deletedNoWatermark = await cache.delete(cacheKeyNoWatermark)
-      
+      const purgedDetails = {}
+
+      // 1. Tenant-level cache purge if X-Purge-Tenant is provided
+      const purgeTenantId = request.headers.get('X-Purge-Tenant')
+      if (purgeTenantId) {
+        const tenantCacheKey = new Request(`https://image-proxy-cache.local/tenant/id/${purgeTenantId}`)
+        const deletedTenant = await cache.delete(tenantCacheKey)
+        purgedDetails.tenantSettings = deletedTenant
+      }
+
+      // 2. Specific asset purge across common variant query strings
+      const baseCleanUrl = request.url.split('?')[0]
+      const variations = [
+        request.url,
+        baseCleanUrl,
+        `${baseCleanUrl}?watermark=false`,
+        `${baseCleanUrl}?wm=1`,
+        `${baseCleanUrl}?wm=0`,
+        `${baseCleanUrl}?w=400`,
+        `${baseCleanUrl}?w=800`,
+        `${baseCleanUrl}?w=1200`,
+        `${baseCleanUrl}?w=1600`,
+        `${baseCleanUrl}?w=400&wm=1`,
+        `${baseCleanUrl}?w=800&wm=1`,
+        `${baseCleanUrl}?w=1200&wm=1`,
+        `${baseCleanUrl}?w=1600&wm=1`
+      ]
+
+      const uniqueVariations = [...new Set(variations)]
+      const results = await Promise.all(
+        uniqueVariations.map(async (variantUrl) => {
+          return cache.delete(new Request(variantUrl, { method: 'GET' }))
+        })
+      )
+
+      purgedDetails.variants = uniqueVariations.filter((_, idx) => results[idx])
+      purgedDetails.totalVariantsPurged = results.filter(Boolean).length
+
       return new Response(JSON.stringify({
         success: true,
-        purged: { default: deletedDefault, clean: deletedNoWatermark }
+        purged: purgedDetails
       }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }

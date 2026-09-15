@@ -1,5 +1,9 @@
 # image-proxy — Version History
 
+## VERSION 0.8.3 (2026-09-15) - Enhanced Edge PURGE & Tenant-Level Invalidation
+- **Tenant-Level Settings Purge (`X-Purge-Tenant`)**: Extended the HTTP `PURGE` handler to invalidate `https://image-proxy-cache.local/tenant/id/${tenantId}` edge cache on demand whenever site settings or watermarking configurations are updated.
+- **Multi-Variant Wildcard Invalidation**: Upgraded asset purging to simultaneously invalidate common width and watermark query variations (`?watermark=false`, `?wm=1`, `?wm=0`, `?w=400`, `?w=800`, `?w=1200`, `?w=1600` with and without `wm=1`).
+
 ## VERSION 0.8.2 (2026-09-06) - Multi-Project Architecture Alignment & Legacy Column Elimination
 - **Native Multi-Project Lookup**: Updated `getTenantSettings` to query `management.tbl_client_projects` alongside `tbl_clients`, dynamically collecting licensed domains across all active client projects (`tcp_allowed_domains`) and applying primary project plan features and overrides.
 - **Eliminated Deprecated `tc_domain` Queries**: Permanently replaced direct queries on `management.tbl_clients.tc_domain` in domain authorization checks and `/api/storage/overview` reporting with `tbl_client_projects`.
