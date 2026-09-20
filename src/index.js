@@ -168,10 +168,17 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
     return result
   }
 
-  const headers = {
+  const clientHeaders = {
     'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
     'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
     'Accept': 'application/vnd.pgrst.object+json',
+    'Accept-Profile': 'management',
+  }
+
+  const projectHeaders = {
+    'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
+    'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    'Accept': 'application/json',
     'Accept-Profile': 'management',
   }
 
@@ -179,8 +186,8 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
   const projectsUrl = `${env.SUPABASE_URL}/rest/v1/tbl_client_projects?tcp_client_id=eq.${tenantId}&tcp_deleted_flag=eq.false&order=tcp_is_primary.desc,tcp_created_at.asc`
 
   const [clientResp, projectsResp] = await Promise.all([
-    fetch(clientUrl, { headers }),
-    fetch(projectsUrl, { headers }),
+    fetch(clientUrl, { headers: clientHeaders }),
+    fetch(projectsUrl, { headers: projectHeaders }),
   ])
 
   if (!clientResp.ok) {
@@ -196,8 +203,14 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
     throw new Error('TENANT_NOT_FOUND')
   }
 
-  const projects = projectsResp.ok ? await projectsResp.json() : []
-  const primaryProject = Array.isArray(projects) && projects.length > 0 ? projects[0] : null
+  let projects = []
+  if (projectsResp?.ok) {
+    const pData = await projectsResp.json()
+    projects = Array.isArray(pData) ? pData : (pData ? [pData] : [])
+  }
+  const primaryProject = Array.isArray(projects) && projects.length > 0 
+    ? (projects.find(p => p.tcp_is_primary) || projects[0]) 
+    : null
 
   // Collect all licensed domains across all active client projects
   const allDomains = []
@@ -207,6 +220,10 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
         p.tcp_allowed_domains.forEach((d) => allDomains.push(d))
       }
     })
+  }
+  // Backward compatibility fallback to client.tc_domain if no project domains found
+  if (allDomains.length === 0 && client.tc_domain) {
+    client.tc_domain.split(',').forEach((d) => allDomains.push(d))
   }
 
   const licensedDomains = allDomains
@@ -225,10 +242,11 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
   const targetPlanId = primaryProject?.tcp_plan_id || client.tc_plan_id
   if (targetPlanId) {
     const planUrl = `${env.SUPABASE_URL}/rest/v1/tbl_plans?tp_id=eq.${targetPlanId}`
-    const planResp = await fetch(planUrl, { headers })
-    if (planResp.ok) {
-      const plan = await planResp.json()
-      planFeatures = plan.tp_features || {}
+    const planResp = await fetch(planUrl, { headers: projectHeaders })
+    if (planResp?.ok) {
+      const planData = await planResp.json()
+      const plan = Array.isArray(planData) ? planData[0] : planData
+      planFeatures = plan?.tp_features || {}
     }
   }
 
@@ -245,7 +263,7 @@ async function getTenantSettings(tenantId, hostname, env, requestUrlHost = '') {
   const settingsUrl = `${env.SUPABASE_URL}/rest/v1/tbl_site_settings?client_id=eq.${client.tc_id}&tss_key=in.(watermark_enabled,watermark_url)&tss_deleted_flag=eq.false`
   const settingsResp = await fetch(settingsUrl, { headers: studioHeaders })
   const watermarkSettings = { watermark_enabled: 'false', watermark_url: '' }
-  if (settingsResp.ok) {
+  if (settingsResp?.ok) {
     const settingsList = await settingsResp.json()
     if (Array.isArray(settingsList)) {
       settingsList.forEach(item => {
@@ -314,6 +332,37 @@ async function fetchFromB2(bucketName, objectKey, env) {
     headers: {
       'Host': `${bucketName}.${cleanEndpoint}`,
     }
+  })
+
+  return response
+}
+
+/**
+ * Put to Backblaze B2 via S3-Compatible API with SIGv4 Signing.
+ */
+async function putToB2(bucketName, objectKey, body, contentType, env) {
+  if (!env.B2_APPLICATION_KEY_ID || !env.B2_APPLICATION_KEY || !env.B2_ENDPOINT) {
+    throw new Error('Vault Configuration Error: Missing core storage credentials.')
+  }
+
+  const cleanEndpoint = env.B2_ENDPOINT.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+  const region = cleanEndpoint.split('.')[1] || 'us-east-005'
+
+  const b2 = new AwsClient({
+    accessKeyId: env.B2_APPLICATION_KEY_ID,
+    secretAccessKey: env.B2_APPLICATION_KEY,
+    service: 's3',
+    region: region,
+  })
+
+  const url = `https://${bucketName}.${cleanEndpoint}/${objectKey}`
+  const response = await b2.fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Host': `${bucketName}.${cleanEndpoint}`,
+      'Content-Type': contentType,
+    },
+    body: body,
   })
 
   return response
@@ -1043,28 +1092,60 @@ export default Sentry.withSentry(
     }
 
     // -- Handle PUT (Secure Upload Proxy) --
-    if (request.method === 'PUT' && (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2' || route.bucket === 'HYBRID_IMAGES')) {
-      const bucketBinding = (route.bucket === 'R2' || route.bucket === 'HYBRID_IMAGES') ? env.BUCKET : (route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET);
-      if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
-      try {
-        const contentType = request.headers.get('Content-Type') || 'image/jpeg'
-        await bucketBinding.put(cleanObjectKey, request.body, {
-          httpMetadata: { contentType },
-          customMetadata: {
-            tenant_id: tenantSettings.data.client_id,
-            uploaded_at: new Date().toISOString(),
-          }
-        })
-        return new Response(JSON.stringify({ success: true, key: cleanObjectKey }), {
-          status: 200,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      } catch (_err) {
-        return new Response(JSON.stringify({ error: 'Upload failed' }), {
-          status: 500,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
+    if (request.method === 'PUT') {
+      const contentType = request.headers.get('Content-Type') || 'image/jpeg'
+
+      // Site internal assets and platform assets -> Cloudflare R2
+      if (route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2') {
+        const bucketBinding = route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET
+        if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
+        try {
+          await bucketBinding.put(cleanObjectKey, request.body, {
+            httpMetadata: { contentType },
+            customMetadata: {
+              tenant_id: tenantSettings.data.client_id,
+              uploaded_at: new Date().toISOString(),
+            }
+          })
+          return new Response(JSON.stringify({ success: true, key: cleanObjectKey }), {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        } catch (_err) {
+          return new Response(JSON.stringify({ error: 'Upload failed' }), {
+            status: 500,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
       }
+
+      // Public gallery images (/images/) -> Backblaze B2 (studio-public-gallery)
+      if (route.bucket === 'HYBRID_IMAGES') {
+        try {
+          const b2Bucket = env.B2_GALLERY_BUCKET || 'studio-public-gallery'
+          const b2Resp = await putToB2(b2Bucket, cleanObjectKey, request.body, contentType, env)
+          if (!b2Resp.ok) {
+            return new Response(JSON.stringify({ error: `B2 upload failed (${b2Resp.status})` }), {
+              status: b2Resp.status,
+              headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+            })
+          }
+          return new Response(JSON.stringify({ success: true, key: cleanObjectKey }), {
+            status: 200,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        } catch (_err) {
+          return new Response(JSON.stringify({ error: 'Upload to B2 failed' }), {
+            status: 500,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
+      return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+        status: 405,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
     }
 
     // -- Handle GET (Secure Retrieval) --
@@ -1124,10 +1205,10 @@ export default Sentry.withSentry(
         const widthParam = url.searchParams.get('w')
         const watermarkParam = url.searchParams.get('wm') === '1' || url.searchParams.get('watermark') === 'true'
 
-        // Watermark is applied when explicitly requested for public marketing/site assets, unless clean-authorized
+        // Watermark is applied when explicitly requested or by default on public gallery images when enabled, unless clean-authorized
         const isWatermarked =
           !isCleanAuthorized &&
-          watermarkParam &&
+          (watermarkParam || (route.prefix === '/images/' && url.searchParams.get('watermark') !== 'false')) &&
           route.type === 'image' &&
           features?.enable_watermark &&
           features?.enable_custom_watermark !== false &&
@@ -1138,21 +1219,23 @@ export default Sentry.withSentry(
 
         if (isWatermarked || isResized) {
           const w = widthParam ? parseInt(widthParam, 10) || 1920 : 1920
-          const cleanImageUrl = `https://${url.hostname}${route.prefix}${cleanObjectKey}?watermark=false&bypass=${env.BYPASS_SECRET}`
+          const cleanImageUrl = `https://${url.hostname}${route.prefix}${cleanObjectKey}?watermark=false&bypass=${env.BYPASS_SECRET || ''}`
           
           const parts = cleanObjectKey.split('/')
           const filename = parts.pop()
           const dirPath = parts.join('/')
+          const bypassPart = env.BYPASS_SECRET ? `bypass/${env.BYPASS_SECRET}/` : ''
           // imageKitPath must be relative to the Web Folder origin base (https://imageproxy.zorviktech.com/images/)
-          // so we MUST NOT include the route prefix (e.g. 'images/') — ImageKit will prepend it from the origin config
-          const imageKitPath = `${dirPath}/bypass/${env.BYPASS_SECRET || ''}/${filename}`
+          const imageKitPath = `${dirPath}/${bypassPart}${filename}`
           
           let cdnResponse = null
           if (isWatermarked) {
             let authorizedWatermarkUrl = watermark.url
             try {
               const wmUrlObj = new URL(watermark.url)
-              wmUrlObj.searchParams.set('bypass', env.BYPASS_SECRET)
+              if (env.BYPASS_SECRET) {
+                wmUrlObj.searchParams.set('bypass', env.BYPASS_SECRET)
+              }
               authorizedWatermarkUrl = wmUrlObj.toString()
             } catch (_e) {
               // fallback
@@ -1163,21 +1246,7 @@ export default Sentry.withSentry(
               .replace(/\+/g, '-')
               .replace(/=/g, '')
 
-            let imageKitWatermarkPath = ''
-            try {
-              const wmUrlObj = new URL(watermark.url)
-              const wmPathname = wmUrlObj.pathname
-              // Strip the /images/ prefix so the watermark path is also relative to the Web Folder origin base
-              const wmStripped = wmPathname.startsWith('/images/') ? wmPathname.slice(8) : (wmPathname.startsWith('/') ? wmPathname.slice(1) : wmPathname)
-              const wmParts = wmStripped.split('/')
-              const wmFilename = wmParts.pop()
-              const wmDirPath = wmParts.join('/')
-              imageKitWatermarkPath = `${wmDirPath}/bypass/${env.BYPASS_SECRET || ''}/${wmFilename}`
-            } catch (_e) {
-              imageKitWatermarkPath = watermark.url
-            }
-
-            const imageKitBase64Watermark = encodeURIComponent(btoa(imageKitWatermarkPath))
+            const imageKitBase64Watermark = encodeURIComponent(btoa(authorizedWatermarkUrl))
             
             const wmWidth = Math.max(60, Math.round(w * 0.12))
             
@@ -1187,11 +1256,13 @@ export default Sentry.withSentry(
               if (!cdnResponse.ok) throw new Error(`ImageKit status ${cdnResponse.status}`)
             } catch (err) {
               console.error('ImageKit failed, falling back to Cloudinary:', err)
+              Sentry.captureException(err, { extra: { tenantId, imageKitPath } })
               try {
                 const cloudinaryUrl = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/fetch/w_${w},c_limit,l_fetch:${cloudinaryBase64Watermark},g_south_east,x_15,y_15,o_80/${encodeURIComponent(cleanImageUrl)}`
                 cdnResponse = await fetch(cloudinaryUrl)
               } catch (clErr) {
                 console.error('Cloudinary fallback failed:', clErr)
+                Sentry.captureException(clErr, { extra: { tenantId, cleanImageUrl } })
               }
             }
           } else {

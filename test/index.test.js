@@ -1,5 +1,5 @@
 /**
- * image-proxy Worker — Unit Test Suite (v0.5.0)
+ * image-proxy Worker — Unit Test Suite (v0.8.4)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import worker from '../src/index.js'
@@ -18,11 +18,21 @@ const mockBucket = {
   put: vi.fn(),
 }
 
+const mockSystemBucket = {
+  get: vi.fn(),
+  put: vi.fn(),
+}
+
 const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'test-key',
   BUCKET: mockBucket,
+  SYSTEM_BUCKET: mockSystemBucket,
   BYPASS_SECRET: 'test-bypass-secret',
+  B2_ENDPOINT: 'https://s3.eu-central-003.backblazeb2.com',
+  B2_APPLICATION_KEY_ID: 'test-key-id',
+  B2_APPLICATION_KEY: 'test-key-secret',
+  B2_GALLERY_BUCKET: 'studio-public-gallery',
 }
 
 const mockCtx = {
@@ -38,6 +48,20 @@ const supabaseClientActive = (id = 'tenant-123') => mockJsonResponse({
   tc_feature_overrides: { enable_watermark: false }
 })
 
+function mockTenantLookupSuccess(tenantId = 'tenant-123', domains = ['worker.dev', 'localhost'], features = {}) {
+  fetch
+    .mockResolvedValueOnce(supabaseClientActive(tenantId))
+    .mockResolvedValueOnce(mockJsonResponse([{
+      tcp_id: 'proj-1',
+      tcp_client_id: tenantId,
+      tcp_is_primary: true,
+      tcp_allowed_domains: domains,
+      tcp_plan_id: 'plan-basic',
+    }]))
+    .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: features }))
+    .mockResolvedValueOnce(mockJsonResponse([]))
+}
+
 // ── Setup / Teardown ─────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -50,6 +74,8 @@ beforeEach(() => {
   })
   mockBucket.get.mockReset()
   mockBucket.put.mockReset()
+  mockSystemBucket.get.mockReset()
+  mockSystemBucket.put.mockReset()
   mockCtx.waitUntil.mockReset()
   mockCtx.passThroughOnException.mockReset()
 })
@@ -79,12 +105,25 @@ describe('Basic Routing', () => {
 })
 
 describe('Identity-First Verification (PUT)', () => {
-  it('successfully uploads to R2 when tenantId and Origin are valid', async () => {
-    fetch
-      .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
-      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-    mockBucket.put.mockResolvedValueOnce(undefined)
+  it('successfully uploads site assets to R2 when tenantId and Origin are valid', async () => {
+    mockTenantLookupSuccess('tenant-123')
+    mockSystemBucket.put.mockResolvedValueOnce(undefined)
+
+    const req = new Request('https://worker.dev/site/tenant-123/logo.png', {
+      method: 'PUT',
+      headers: { 'Origin': 'http://localhost:5173', 'Content-Type': 'image/png' },
+      body: new Uint8Array([0x00])
+    })
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+    expect(mockSystemBucket.put).toHaveBeenCalledWith('tenant-123/logo.png', expect.anything(), expect.objectContaining({
+      customMetadata: expect.objectContaining({ tenant_id: 'tenant-123' })
+    }))
+  })
+
+  it('successfully uploads gallery images to Backblaze B2 via S3 API', async () => {
+    mockTenantLookupSuccess('tenant-123')
+    fetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
 
     const req = new Request('https://worker.dev/images/tenant-123/test.jpg', {
       method: 'PUT',
@@ -93,14 +132,25 @@ describe('Identity-First Verification (PUT)', () => {
     })
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
-    expect(mockBucket.put).toHaveBeenCalledWith('tenant-123/test.jpg', expect.anything(), expect.objectContaining({
-      customMetadata: expect.objectContaining({ tenant_id: 'tenant-123' })
-    }))
+    const b2Call = fetch.mock.calls[4]
+    const fetchedUrl = typeof b2Call[0] === 'string' ? b2Call[0] : b2Call[0].url
+    expect(fetchedUrl).toContain('studio-public-gallery')
+    expect(fetchedUrl).toContain('tenant-123/test.jpg')
   })
 
   it('rejects upload (403) when Origin is unauthorized for that tenantId', async () => {
-    // Tenant-123 is ONLY authorized for worker.dev, not malicious.com
-    fetch.mockResolvedValueOnce(supabaseClientActive('tenant-123'))
+    fetch
+      .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
+      .mockResolvedValueOnce(mockJsonResponse([{
+        tcp_id: 'proj-1',
+        tcp_client_id: 'tenant-123',
+        tcp_is_primary: true,
+        tcp_allowed_domains: ['worker.dev'],
+        tcp_plan_id: 'plan-basic',
+      }]))
+      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
+      .mockResolvedValueOnce(mockJsonResponse([]))
+
     const req = new Request('https://worker.dev/images/tenant-123/test.jpg', {
       method: 'PUT',
       headers: { 'Origin': 'https://malicious.com' }
@@ -120,17 +170,14 @@ describe('Identity-First Verification (PUT)', () => {
 
 describe('Identity-First Verification (GET)', () => {
   it('serves image when tenantId and Host match', async () => {
-    fetch
-      .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
-      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
-      .mockResolvedValueOnce(mockJsonResponse([]))
+    mockTenantLookupSuccess('tenant-123')
     mockBucket.get.mockResolvedValueOnce({
       body: new Uint8Array([0x00]).buffer,
       httpMetadata: { contentType: 'image/jpeg' }
     })
 
     const req = new Request('https://worker.dev/images/tenant-123/photo.jpg', {
-        headers: { 'Origin': 'https://worker.dev' }
+      headers: { 'Origin': 'https://worker.dev' }
     })
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
@@ -147,7 +194,6 @@ describe('Identity-First Verification (GET)', () => {
     const req = new Request('https://worker.dev/images/tenant-123/photo.jpg/bypass/test-bypass-secret')
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
-    // Verify it retrieves standard cleaned object key without standard suffix
     expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
   })
 
@@ -161,20 +207,11 @@ describe('Identity-First Verification (GET)', () => {
     const req = new Request('https://worker.dev/images/tenant-123/bypass/test-bypass-secret/photo.jpg')
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
-    // Verify it retrieves standard cleaned object key with standard infix removed
     expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
   })
 
   it('serves PDF contract on direct link navigation without Origin/Referer headers', async () => {
-    fetch
-      .mockResolvedValueOnce(mockJsonResponse({
-        tc_id: 'tenant-123',
-        tc_domain: 'clientcustomdomain.com',
-        tc_status: 'active',
-        tc_plan_id: 'plan-basic',
-      }))
-      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
-      .mockResolvedValueOnce(mockJsonResponse([]))
+    mockTenantLookupSuccess('tenant-123', ['clientcustomdomain.com'])
     mockBucket.get.mockResolvedValueOnce({
       body: new Uint8Array([0x00]).buffer,
       httpMetadata: { contentType: 'application/pdf' }
@@ -188,15 +225,7 @@ describe('Identity-First Verification (GET)', () => {
   })
 
   it('allows requests from system platform subdomains (*.zorviktech.com)', async () => {
-    fetch
-      .mockResolvedValueOnce(mockJsonResponse({
-        tc_id: 'tenant-123',
-        tc_domain: 'clientcustomdomain.com',
-        tc_status: 'active',
-        tc_plan_id: 'plan-basic',
-      }))
-      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
-      .mockResolvedValueOnce(mockJsonResponse([]))
+    mockTenantLookupSuccess('tenant-123', ['clientcustomdomain.com'])
     mockBucket.get.mockResolvedValueOnce({
       body: new Uint8Array([0x00]).buffer,
       httpMetadata: { contentType: 'application/pdf' }
@@ -218,21 +247,11 @@ describe('Identity-First Verification (GET)', () => {
       B2_PRIVATE_BUCKET: 'studio-private-deliverables',
     }
 
-    // Mock tenant settings lookup
-    fetch
-      .mockResolvedValueOnce(mockJsonResponse({
-        tc_id: 'tenant-123',
-        tc_domain: 'worker.dev, localhost',
-        tc_status: 'active',
-        tc_plan_id: 'plan-basic',
-      }))
-      .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: {} }))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      // Mock B2 S3 response
-      .mockResolvedValueOnce(new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
-        status: 200,
-        headers: { 'Content-Type': 'application/pdf' },
-      }))
+    mockTenantLookupSuccess('tenant-123')
+    fetch.mockResolvedValueOnce(new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/pdf' },
+    }))
 
     const req = new Request('https://worker.dev/deliverables/tenant-123/contracts/signed_contract.pdf', {
       headers: { 'Origin': 'http://localhost:5173' },
@@ -243,7 +262,7 @@ describe('Identity-First Verification (GET)', () => {
     expect(res.headers.get('Content-Type')).toBe('application/pdf')
 
     // Verify fetch was called with cleaned S3 URL (without duplicate https://)
-    const b2Call = fetch.mock.calls[3]
+    const b2Call = fetch.mock.calls[4]
     const fetchedUrl = typeof b2Call[0] === 'string' ? b2Call[0] : b2Call[0].url
     expect(fetchedUrl).toBe('https://studio-private-deliverables.s3.eu-central-003.backblazeb2.com/tenant-123/contracts/signed_contract.pdf')
   })
@@ -251,6 +270,13 @@ describe('Identity-First Verification (GET)', () => {
   it('serves clean original asset when valid HMAC signature is provided', async () => {
     fetch
       .mockResolvedValueOnce(supabaseClientActive('tenant-123'))
+      .mockResolvedValueOnce(mockJsonResponse([{
+        tcp_id: 'proj-1',
+        tcp_client_id: 'tenant-123',
+        tcp_is_primary: true,
+        tcp_allowed_domains: ['worker.dev'],
+        tcp_plan_id: 'plan-basic',
+      }]))
       .mockResolvedValueOnce(mockJsonResponse({ tp_id: 'plan-basic', tp_features: { enable_watermark: true } }))
       .mockResolvedValueOnce(mockJsonResponse([
         { tss_key: 'watermark_enabled', tss_value: 'true' },
@@ -280,5 +306,3 @@ describe('Identity-First Verification (GET)', () => {
     expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
   })
 })
-
-

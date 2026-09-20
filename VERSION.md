@@ -1,5 +1,13 @@
 # image-proxy — Version History
 
+## VERSION 0.8.4 (2026-09-20) - Watermark Overlay Base64 Encoding, Multi-Cloud PUT Routing & Multi-Project Plan Resolution Fix
+- **Multi-Cloud PUT Separation (`putToB2`)**: Updated `PUT /images/*` to sign and upload directly to Backblaze B2 (`studio-public-gallery`) via S3 SigV4. Cloudflare R2 bindings are strictly reserved for site internal branding (`/site/`) and platform assets (`/assets/`).
+- **PostgREST Multi-Project Lookup Fix**: Fixed PostgREST content negotiation header in `getTenantSettings` when fetching `tbl_client_projects` to parse json arrays correctly and load primary project `tp_features` (`enable_watermark`).
+- **ImageKit Watermark Base64 Encoding**: Encoded full watermark overlay URLs to standard base64 for ImageKit `l-image,ie-` syntax, fixing 404/failure when applying watermarks from both B2 and R2 buckets.
+- **Auto Watermarking**: Enabled automatic watermarking on public portfolio `/images/` requests when enabled in tenant settings without requiring explicit `watermark=true` query parameters.
+- **Bypass Secret Fallback**: Corrected ImageKit clean image path interpolation when `BYPASS_SECRET` is unset to prevent double slash artifacts.
+- **Sentry Exception Capture**: Added Sentry exception capture before fallback response on image processing errors.
+
 ## VERSION 0.8.3 (2026-09-15) - Enhanced Edge PURGE & Tenant-Level Invalidation
 - **Tenant-Level Settings Purge (`X-Purge-Tenant`)**: Extended the HTTP `PURGE` handler to invalidate `https://image-proxy-cache.local/tenant/id/${tenantId}` edge cache on demand whenever site settings or watermarking configurations are updated.
 - **Multi-Variant Wildcard Invalidation**: Upgraded asset purging to simultaneously invalidate common width and watermark query variations (`?watermark=false`, `?wm=1`, `?wm=0`, `?w=400`, `?w=800`, `?w=1200`, `?w=1600` with and without `wm=1`).
