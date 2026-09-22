@@ -338,37 +338,6 @@ async function fetchFromB2(bucketName, objectKey, env) {
 }
 
 /**
- * Put to Backblaze B2 via S3-Compatible API with SIGv4 Signing.
- */
-async function putToB2(bucketName, objectKey, body, contentType, env) {
-  if (!env.B2_APPLICATION_KEY_ID || !env.B2_APPLICATION_KEY || !env.B2_ENDPOINT) {
-    throw new Error('Vault Configuration Error: Missing core storage credentials.')
-  }
-
-  const cleanEndpoint = env.B2_ENDPOINT.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
-  const region = cleanEndpoint.split('.')[1] || 'us-east-005'
-
-  const b2 = new AwsClient({
-    accessKeyId: env.B2_APPLICATION_KEY_ID,
-    secretAccessKey: env.B2_APPLICATION_KEY,
-    service: 's3',
-    region: region,
-  })
-
-  const url = `https://${bucketName}.${cleanEndpoint}/${objectKey}`
-  const response = await b2.fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Host': `${bucketName}.${cleanEndpoint}`,
-      'Content-Type': contentType,
-    },
-    body: body,
-  })
-
-  return response
-}
-
-/**
  * Helper: Parse AWS S3 ListObjectsV2 XML response without external dependencies.
  */
 function parseS3ListXml(xmlText) {
@@ -750,7 +719,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.8.0' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.8.5' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -1119,23 +1088,28 @@ export default Sentry.withSentry(
         }
       }
 
-      // Public gallery images (/images/) -> Backblaze B2 (studio-public-gallery)
+      // Public gallery images (/images/) -> Cloudflare R2 (studio-public-gallery)
+      // Note: studio-public-gallery is an R2 bucket (env.BUCKET), NOT a Backblaze B2 bucket.
       if (route.bucket === 'HYBRID_IMAGES') {
+        // Graceful handling: If path contains /site/, store in SYSTEM_BUCKET (R2 studio-site-assets)
+        const targetBucket = cleanObjectKey.includes('/site/') && env.SYSTEM_BUCKET
+          ? env.SYSTEM_BUCKET
+          : env.BUCKET
+        if (!targetBucket) throw new Error('R2 Bucket binding is missing.')
         try {
-          const b2Bucket = env.B2_GALLERY_BUCKET || 'studio-public-gallery'
-          const b2Resp = await putToB2(b2Bucket, cleanObjectKey, request.body, contentType, env)
-          if (!b2Resp.ok) {
-            return new Response(JSON.stringify({ error: `B2 upload failed (${b2Resp.status})` }), {
-              status: b2Resp.status,
-              headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-            })
-          }
+          await targetBucket.put(cleanObjectKey, request.body, {
+            httpMetadata: { contentType },
+            customMetadata: {
+              tenant_id: tenantSettings.data.client_id,
+              uploaded_at: new Date().toISOString(),
+            }
+          })
           return new Response(JSON.stringify({ success: true, key: cleanObjectKey }), {
             status: 200,
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })
         } catch (_err) {
-          return new Response(JSON.stringify({ error: 'Upload to B2 failed' }), {
+          return new Response(JSON.stringify({ error: 'Upload to R2 failed' }), {
             status: 500,
             headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
           })

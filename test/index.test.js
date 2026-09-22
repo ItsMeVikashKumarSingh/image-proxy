@@ -121,9 +121,9 @@ describe('Identity-First Verification (PUT)', () => {
     }))
   })
 
-  it('successfully uploads gallery images to Backblaze B2 via S3 API', async () => {
+  it('successfully uploads gallery images to Cloudflare R2 bucket', async () => {
     mockTenantLookupSuccess('tenant-123')
-    fetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
+    mockBucket.put.mockResolvedValueOnce(undefined)
 
     const req = new Request('https://worker.dev/images/tenant-123/test.jpg', {
       method: 'PUT',
@@ -132,10 +132,25 @@ describe('Identity-First Verification (PUT)', () => {
     })
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
-    const b2Call = fetch.mock.calls[4]
-    const fetchedUrl = typeof b2Call[0] === 'string' ? b2Call[0] : b2Call[0].url
-    expect(fetchedUrl).toContain('studio-public-gallery')
-    expect(fetchedUrl).toContain('tenant-123/test.jpg')
+    expect(mockBucket.put).toHaveBeenCalledWith('tenant-123/test.jpg', expect.anything(), expect.objectContaining({
+      customMetadata: expect.objectContaining({ tenant_id: 'tenant-123' })
+    }))
+  })
+
+  it('gracefully routes /images/.../site/... uploads to SYSTEM_BUCKET in R2', async () => {
+    mockTenantLookupSuccess('tenant-123')
+    mockSystemBucket.put.mockResolvedValueOnce(undefined)
+
+    const req = new Request('https://worker.dev/images/tenant-123/site/watermark.png', {
+      method: 'PUT',
+      headers: { 'Origin': 'http://localhost:5173', 'Content-Type': 'image/png' },
+      body: new Uint8Array([0x00])
+    })
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+    expect(mockSystemBucket.put).toHaveBeenCalledWith('tenant-123/site/watermark.png', expect.anything(), expect.objectContaining({
+      customMetadata: expect.objectContaining({ tenant_id: 'tenant-123' })
+    }))
   })
 
   it('rejects upload (403) when Origin is unauthorized for that tenantId', async () => {

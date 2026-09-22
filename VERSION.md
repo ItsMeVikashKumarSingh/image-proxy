@@ -1,5 +1,11 @@
 # image-proxy — Version History
 
+## VERSION 0.8.5 (2026-09-22) - Multi-Cloud Storage Alignment (R2 Images & Site Assets, B2 Deliverables & Video)
+- **Restore R2 Portfolio Image Uploads (`PUT /images/*`)**: Reverted `/images/` upload routing to Cloudflare R2 bucket `studio-public-gallery` (`env.BUCKET`), correcting the previous invalid attempt to write to Backblaze B2 (which returned 404 because `studio-public-gallery` is hosted exclusively on R2).
+- **Graceful Site Asset Routing**: Added fallback in `PUT /images/*` so any requests containing `/site/` in the path (e.g. legacy backend paths `/images/{tenantId}/site/...`) are gracefully stored in `env.SYSTEM_BUCKET` (`studio-site-assets`) on Cloudflare R2.
+- **Removed Unused `putToB2`**: Cleaned up unused B2 PUT signing helper from worker since video reels, films, and deliverables upload directly via S3 presigned PUT URLs to Backblaze B2.
+- **Updated Health Metadata**: Synchronized `/health` version to `0.8.5`.
+
 ## VERSION 0.8.4 (2026-09-20) - Watermark Overlay Base64 Encoding, Multi-Cloud PUT Routing & Multi-Project Plan Resolution Fix
 - **Multi-Cloud PUT Separation (`putToB2`)**: Updated `PUT /images/*` to sign and upload directly to Backblaze B2 (`studio-public-gallery`) via S3 SigV4. Cloudflare R2 bindings are strictly reserved for site internal branding (`/site/`) and platform assets (`/assets/`).
 - **PostgREST Multi-Project Lookup Fix**: Fixed PostgREST content negotiation header in `getTenantSettings` when fetching `tbl_client_projects` to parse json arrays correctly and load primary project `tp_features` (`enable_watermark`).
