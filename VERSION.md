@@ -1,4 +1,11 @@
-# image-proxy — Version History
+# ZMedia — Version History
+
+## VERSION 0.9.0 (2026-09-23) - Project Rebranding to ZMedia & External Google Drive Media Watermarking
+- **Platform Rebranding (`ZMedia`)**: Rebranded service from `image-proxy` to `ZMedia`, standardizing alongside ecosystem services (`ZConnect`, `ZManage-Web`, `ZManage-APIs`).
+- **Domain Alignment**: Added `zmedia.zorviktech.com` and `media.zorviktech.com` to `ALLOWED_SYSTEM_DOMAINS` while preserving `imageproxy.zorviktech.com` for complete backward compatibility.
+- **External Google Drive Media Watermarking (`/external/`)**: Added native support for proxying and dynamically watermarking external Google Drive media (`lh3.googleusercontent.com` / `drive.google.com`) through ImageKit overlay pipeline, enabling full watermarking for Drive photos with 0 MB Zorvik storage quota consumed.
+- **Fallback Streaming for External Assets**: Ensured external photos gracefully stream as clean images if watermarking is disabled or during clean-authorized bypass requests.
+- **Service Metadata**: Updated `/health` endpoint to report `service: 'zmedia'` and `version: '0.9.0'`.
 
 ## VERSION 0.8.5 (2026-09-22) - Multi-Cloud Storage Alignment (R2 Images & Site Assets, B2 Deliverables & Video)
 - **Restore R2 Portfolio Image Uploads (`PUT /images/*`)**: Reverted `/images/` upload routing to Cloudflare R2 bucket `studio-public-gallery` (`env.BUCKET`), correcting the previous invalid attempt to write to Backblaze B2 (which returned 404 because `studio-public-gallery` is hosted exclusively on R2).

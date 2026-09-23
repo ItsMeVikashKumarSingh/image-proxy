@@ -92,7 +92,8 @@ describe('Basic Routing', () => {
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.version).toMatch(/^\d+\.\d+(\.\d+)?$/)
+    expect(body.service).toBe('zmedia')
+    expect(body.version).toBe('0.9.0')
   })
 
   it('GET /: returns 200 simple status message', async () => {
@@ -319,5 +320,24 @@ describe('Identity-First Verification (GET)', () => {
     const res = await worker.fetch(req, mockEnv, mockCtx)
     expect(res.status).toBe(200)
     expect(mockBucket.get).toHaveBeenCalledWith('tenant-123/photo.jpg')
+  })
+
+  it('successfully fetches and serves external Google Drive media via /external/', async () => {
+    mockTenantLookupSuccess('tenant-123')
+    const externalUrl = 'https://lh3.googleusercontent.com/d/mock-file-id=w1600'
+    const b64Url = Buffer.from(externalUrl).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+    // Mock fetch for external image
+    fetch.mockResolvedValueOnce(new Response(new Uint8Array([0x01, 0x02]), {
+      status: 200,
+      headers: { 'Content-Type': 'image/jpeg' }
+    }))
+
+    const req = new Request(`https://worker.dev/images/tenant-123/external/${b64Url}?watermark=false`, {
+      headers: { 'Origin': 'https://worker.dev' }
+    })
+    const res = await worker.fetch(req, mockEnv, mockCtx)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toBe('image/jpeg')
   })
 })

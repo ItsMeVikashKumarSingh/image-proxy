@@ -1,9 +1,9 @@
 {
-  "name": "wedding-image-proxy",
-  "version": "0.8.0",
+  "name": "zmedia",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker for secure, dynamic image watermarking via Cloudflare Image Resizing.",
+  "description": "ZMedia — Multi-Cloud Media Gateway & Dynamic Edge CDN for the Zorvik Platform.",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

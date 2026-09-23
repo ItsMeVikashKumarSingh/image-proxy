@@ -73,7 +73,9 @@ function isAllowedDomain(hostname, licensedDomains, requestUrlHost = '') {
   }
 
   const ALLOWED_SYSTEM_DOMAINS = [
+    'zmedia.zorviktech.com',
     'imageproxy.zorviktech.com',
+    'media.zorviktech.com',
     'zorviktech.com',
     'studio.zorviktech.com',
     'admin.zorviktech.com',
@@ -719,7 +721,7 @@ export default Sentry.withSentry(
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', service: 'wedding-image-proxy', version: '0.8.5' }), {
+      return new Response(JSON.stringify({ status: 'ok', service: 'zmedia', version: '0.9.0' }), {
         status: 200,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
@@ -1126,39 +1128,6 @@ export default Sentry.withSentry(
     try {
       let response
       if (route.bucket === 'R2' || route.bucket === 'SYSTEM_R2' || route.bucket === 'ASSETS_R2' || route.bucket === 'HYBRID_IMAGES') {
-        let object = null
-
-        if (route.bucket === 'HYBRID_IMAGES') {
-          // 1. Try fetching from Backblaze B2 (primary destination)
-          try {
-            const b2Resp = await fetchFromB2(env.B2_GALLERY_BUCKET || 'studio-public-gallery', cleanObjectKey, env)
-            if (b2Resp && b2Resp.ok) {
-              object = {
-                body: b2Resp.body,
-                httpMetadata: { contentType: resolveB2ContentType(cleanObjectKey, b2Resp) },
-              }
-            }
-          } catch (_b2Err) {
-            // fallback to R2
-          }
-
-          // 2. Fallback to Cloudflare R2 (legacy destination)
-          if (!object && env.BUCKET) {
-            object = await env.BUCKET.get(cleanObjectKey)
-          }
-        } else {
-          const bucketBinding = route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET
-          if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
-          object = await bucketBinding.get(cleanObjectKey)
-        }
-
-        if (!object) {
-          return new Response(JSON.stringify({ error: `Asset not found in storage: ${cleanObjectKey}` }), {
-            status: 404,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
-
         // Verify authorization for clean/original downloads and previews
         const sigParam = url.searchParams.get('sig')
         const expParam = url.searchParams.get('exp')
@@ -1173,6 +1142,77 @@ export default Sentry.withSentry(
         const isBearerAuthorized = authHeader.startsWith('Bearer ') && authHeader.length > 20
 
         const isCleanAuthorized = isBypassed || isHmacAuthorized || isAdminSecretValid || isBearerAuthorized
+
+        let object = null
+
+        if (route.bucket === 'HYBRID_IMAGES') {
+          if (cleanObjectKey.includes('/external/')) {
+            const b64Url = cleanObjectKey.split('/external/')[1]
+            let decodedUrl = ''
+            try {
+              const normalized = b64Url.replace(/-/g, '+').replace(/_/g, '/')
+              decodedUrl = atob(normalized)
+            } catch (_err) {
+              return new Response(JSON.stringify({ error: 'Invalid external URL encoding' }), {
+                status: 400,
+                headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+              })
+            }
+
+            if (isCleanAuthorized) {
+              try {
+                const extResp = await fetch(decodedUrl, {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                  }
+                })
+                if (extResp.ok) {
+                  object = {
+                    body: extResp.body,
+                    httpMetadata: { contentType: extResp.headers.get('content-type') || 'image/jpeg' },
+                  }
+                }
+              } catch (_fetchErr) {
+                // fall through
+              }
+            } else {
+              // Placeholder object so watermarking / resizing pipeline can process via ImageKit
+              object = {
+                body: null,
+                httpMetadata: { contentType: 'image/jpeg' },
+              }
+            }
+          } else {
+            // 1. Try fetching from Backblaze B2 (primary destination)
+            try {
+              const b2Resp = await fetchFromB2(env.B2_GALLERY_BUCKET || 'studio-public-gallery', cleanObjectKey, env)
+              if (b2Resp && b2Resp.ok) {
+                object = {
+                  body: b2Resp.body,
+                  httpMetadata: { contentType: resolveB2ContentType(cleanObjectKey, b2Resp) },
+                }
+              }
+            } catch (_b2Err) {
+              // fallback to R2
+            }
+
+            // 2. Fallback to Cloudflare R2 (legacy destination)
+            if (!object && env.BUCKET) {
+              object = await env.BUCKET.get(cleanObjectKey)
+            }
+          }
+        } else {
+          const bucketBinding = route.bucket === 'SYSTEM_R2' ? env.SYSTEM_BUCKET : env.ASSETS_BUCKET
+          if (!bucketBinding) throw new Error('R2 Bucket binding is missing.')
+          object = await bucketBinding.get(cleanObjectKey)
+        }
+
+        if (!object) {
+          return new Response(JSON.stringify({ error: `Asset not found in storage: ${cleanObjectKey}` }), {
+            status: 404,
+            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          })
+        }
 
         // Apply Image Resizing/Watermark if enabled (only for images)
         const { features, watermark } = tenantSettings.data
@@ -1265,18 +1305,70 @@ export default Sentry.withSentry(
               },
             })
           } else {
-            // Safe fallback: serve un-watermarked/un-resized image from R2 directly
+            // Safe fallback: serve un-watermarked/un-resized image
+            if (!object.body && cleanObjectKey.includes('/external/')) {
+              const b64Url = cleanObjectKey.split('/external/')[1]
+              const normalized = b64Url.replace(/-/g, '+').replace(/_/g, '/')
+              const decodedUrl = atob(normalized)
+              const extResp = await fetch(decodedUrl, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+              })
+              if (extResp.ok) {
+                response = new Response(extResp.body, {
+                  status: 200,
+                  headers: {
+                    ...CORS_HEADERS,
+                    'Content-Type': extResp.headers.get('content-type') || 'image/jpeg',
+                    'Cache-Control': 'public, max-age=86400, s-maxage=604800',
+                  },
+                })
+              } else {
+                return new Response(JSON.stringify({ error: 'External asset unavailable' }), {
+                  status: extResp.status,
+                  headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+                })
+              }
+            } else {
+              response = new Response(object.body, {
+                status: 200,
+                headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
+              })
+            }
+          }
+        } else {
+          // Serve raw, full-resolution uncompressed asset
+          if (!object.body && cleanObjectKey.includes('/external/')) {
+            const b64Url = cleanObjectKey.split('/external/')[1]
+            const normalized = b64Url.replace(/-/g, '+').replace(/_/g, '/')
+            const decodedUrl = atob(normalized)
+            const extResp = await fetch(decodedUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              }
+            })
+            if (extResp.ok) {
+              response = new Response(extResp.body, {
+                status: 200,
+                headers: {
+                  ...CORS_HEADERS,
+                  'Content-Type': extResp.headers.get('content-type') || 'image/jpeg',
+                  'Cache-Control': 'public, max-age=86400, s-maxage=604800',
+                },
+              })
+            } else {
+              return new Response(JSON.stringify({ error: 'External asset unavailable' }), {
+                status: extResp.status,
+                headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+              })
+            }
+          } else {
             response = new Response(object.body, {
               status: 200,
               headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
             })
           }
-        } else {
-          // Serve raw, full-resolution uncompressed asset directly from R2
-          response = new Response(object.body, {
-            status: 200,
-            headers: { ...CORS_HEADERS, 'Content-Type': object.httpMetadata?.contentType || 'image/jpeg' },
-          })
         }
       } else {
         // Backblaze B2 Retrieval
