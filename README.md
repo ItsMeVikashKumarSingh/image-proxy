@@ -1,21 +1,19 @@
-# wedding-image-proxy
+# ZMedia
 
-[![CI — wedding-image-proxy](https://github.com/YOUR_ORG/wedding-image-proxy/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/YOUR_ORG/wedding-image-proxy/actions/workflows/ci.yml)
+> **Cloudflare Worker** — Real-time image watermarking and secure asset delivery for the Zorvik Tech ecosystem.
 
-> **Cloudflare Worker** — Real-time image watermarking and secure asset delivery for the Studio Suite multi-tenant platform.
-
-Receives image requests from the WEDDING frontend, validates the requesting studio's license via the **Zorvik License API**, fetches the original asset from **Cloudflare R2 / Backblaze B2**, and applies **dynamic watermarks** on-the-fly via Cloudflare Image Resizing — all at the edge, with zero origin server involvement.
+Receives image requests from ZStudio-Frontend, validates the requesting studio's license via the **Zorvik License API**, fetches the original asset from **Cloudflare R2 / Backblaze B2**, and applies **dynamic watermarks** on-the-fly via Cloudflare Image Resizing — all at the edge, with zero origin server involvement.
 
 ---
 
 ## Architecture
 
 ```
-WEDDING Frontend (Netlify)
+ZStudio-Frontend
         │
         │  GET /images/*?url=<bucket_asset_url>
         ▼
-wedding-image-proxy.workers.dev   (this project)
+zmedia.workers.dev   (this project)
         │
         ├── GET Supabase REST API ──► validate tenant & features
         │         ▼  authorized
@@ -70,8 +68,8 @@ All responses include `Access-Control-Allow-Origin: *`.
 ### 1. Clone & install
 
 ```bash
-git clone https://github.com/YOUR_ORG/wedding-image-proxy.git
-cd wedding-image-proxy
+git clone https://github.com/ItsMeVikashKumarSingh/ZMedia.git
+cd ZMedia
 npm install
 ```
 

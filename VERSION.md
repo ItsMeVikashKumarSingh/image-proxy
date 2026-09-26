@@ -1,5 +1,9 @@
 # ZMedia — Version History
 
+## VERSION 0.9.1 (2026-09-26) - Documentation & Ecosystem Alignment
+- **Documentation Standardization (`README.md`)**: Replaced legacy `wedding-image-proxy` references, badges, and clone instructions with official `ZMedia` documentation, architecture diagram, and repository links.
+- **Repository Remote Alignment**: Verified and updated local git remote to canonical HTTPS repository (`https://github.com/ItsMeVikashKumarSingh/ZMedia.git`).
+
 ## VERSION 0.9.0 (2026-09-23) - Project Rebranding to ZMedia & External Google Drive Media Watermarking
 - **Platform Rebranding (`ZMedia`)**: Rebranded service from `image-proxy` to `ZMedia`, standardizing alongside ecosystem services (`ZConnect`, `ZManage-Web`, `ZManage-APIs`).
 - **Domain Alignment**: Added `zmedia.zorviktech.com` and `media.zorviktech.com` to `ALLOWED_SYSTEM_DOMAINS` while preserving `imageproxy.zorviktech.com` for complete backward compatibility.
